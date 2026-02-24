@@ -63,6 +63,8 @@ Upload (ECG / X-ray / Lab)
 
 **Privacy:** Microsoft Presidio + spaCy anonymization runs on all user input before it reaches any model. PERSON → `[PACIENTE]`, DATE → `[DATA]`, LOCATION → `[LOCAL]`.
 
+**Local-first, cloud-capable by design:** The primary target is fully offline operation with MedGemma 1.5 4B. The cloud tier (Gemini 2.5 Flash and others via OpenRouter) was included deliberately — not as a fallback, but to make SLM MedTeacher a production-ready product rather than a prototype. In hospitals with internet access and institutional API agreements, clinicians can seamlessly switch to a more powerful model without changing the interface, the perception pipeline, or the privacy layer. The same teaching workflow, the same anonymization, the same structured ECG and X-ray context — just a stronger reasoning engine when one is available. This dual-tier design means the product is useful on day one in any setting.
+
 ---
 
 ## Models Used
