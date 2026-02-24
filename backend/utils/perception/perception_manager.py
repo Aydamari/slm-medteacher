@@ -7,7 +7,6 @@ logger = logging.getLogger(__name__)
 # #3: Frontend → Backend exam type normalization
 EXAM_TYPE_MAP = {
     "rx": "xray",
-    "tc": "ct",
     "lab": "lab_results",
     # These are already correct but included for completeness
     "ecg": "ecg",
@@ -150,22 +149,6 @@ class PerceptionManager:
                             )
             except Exception as _mg_exc:
                 logger.debug(f"MedGemma vision skipped: {_mg_exc}")
-
-        # 4. TC e RM — sem modelo ML compatível disponível.
-        # O LLM fará análise visual direta; exam_instructions["tc"] fornece a instrução.
-        elif resolved_type in ("ct", "mri"):
-            if language == "pt":
-                summary = (
-                    "\n[ANÁLISE AUTOMÁTICA (IA) NÃO DISPONÍVEL PARA TC/RM]\n"
-                    "Prossiga com análise visual direta da imagem.\n"
-                    "---\n"
-                )
-            else:
-                summary = (
-                    "\n[AUTOMATED AI ANALYSIS NOT AVAILABLE FOR CT/MRI]\n"
-                    "Proceed with direct visual analysis of the image.\n"
-                    "---\n"
-                )
 
         return summary
 

@@ -63,10 +63,6 @@ Sem preâmbulos. Todos os campos coerentes com a HD.""",
 
 No preamble. All fields consistent with HD."""
     },
-    "tc": {
-        "pt": "Instrução para TC: Analise a densidade das estruturas. Identifique massas, coleções, linfonodomegalias ou alterações parenquimatosas. Correlacione achados anatômicos com a clínica do paciente.",
-        "en": "CT Instruction: Analyze the density of structures. Identify masses, collections, lymphadenopathy, or parenchymal changes. Correlate anatomical findings with the patient's clinical presentation."
-    },
     "lab": {
         "pt": "Instrução para Laboratório: Analise os valores em relação aos referenciais. Identifique padrões (ex: inflamatório, infeccioso, anemia, disfunção orgânica). Correlacione os resultados entre si.",
         "en": "Lab Instruction: Analyze values in relation to reference ranges. Identify patterns (e.g., inflammatory, infectious, anemia, organ dysfunction). Correlate the results with each other."

@@ -190,8 +190,6 @@ def _hint_from_file(filename: str, content_type: str, fallback: str) -> str:
         return "ecg"
     if any(kw in fname for kw in ("rx", "xray", "radio", "chest", "torax", "tórax", "pulm")):
         return "xray"
-    if any(kw in fname for kw in ("tc", "_ct", "tomografia", "scan", "abdome")):
-        return "ct"
     return fallback
 
 
@@ -634,7 +632,7 @@ async def chat_multimodal(
             # #5: Inject exam-specific prompts, but skip rigid ECG prompt
             #     when ECG perception already returned partial/error
             # Mapa: tipo normalizado → chave base em EXAM_SPECIFIC_PROMPTS
-            _NORM_TO_PROMPT_KEY = {"xray": "rx", "ct": "tc", "lab_results": "lab"}
+            _NORM_TO_PROMPT_KEY = {"xray": "rx", "lab_results": "lab"}
             is_llm_tier = sessao.model_tier in ("llm_cloud", "hybrid_cloud")
 
             exam_instructions = []
