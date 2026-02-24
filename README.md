@@ -18,7 +18,7 @@ SLM MedTeacher is a privacy-first, offline-capable teaching assistant for medica
 
 MedGemma 1.5 4B is the only open, locally-deployable LLM trained on medical images and text. It runs on a laptop. It works offline. It doesn't cost per token and doesn't send patient data to external servers.
 
-The 4B parameter size was a deliberate design choice. At Q4_K_M quantization, MedGemma 1.5 4B fits within the memory envelope of a high-end smartphone (12–16 GB RAM). As mobile inference runtimes mature (llama.cpp on Android/iOS, ExecuTorch, CoreML), this same architecture is a direct path to a fully on-device smartphone app — the student's phone becomes a clinical teaching tool that works without internet in any clinical setting worldwide.
+The 4B parameter size was a deliberate design choice with mobile deployment in mind. At Q4_K_M quantization, MedGemma 1.5 4B requires ~2.5 GB — within reach of 12 GB Android flagships (Samsung S24+, Pixel 9 Pro) and iPhone 15 Pro and newer, where llama.cpp already runs 7B models today via Apple's Neural Engine and CoreML. The specialized perception models (TorchXRayVision, ECG classifiers) are small enough for mobile conversion to ONNX or TFLite. A native smartphone app is the logical next step: the same architecture, the same privacy guarantee, delivered to the 6+ billion people carrying a capable computer in their pocket.
 
 Our architecture uses MedGemma in two ways:
 1. **LLM reasoning layer** — synthesizes structured perception outputs into clinical teaching dialogue
@@ -127,7 +127,7 @@ Brazil has ~400,000 enrolled medical students and ~50,000 active residents (CFM,
 
 SLM MedTeacher runs locally on a consumer laptop with no GPU required for the 4B model. No API key needed. No data leaves the device.
 
-**Smartphone roadmap:** MedGemma 1.5 4B at Q4_K_M quantization fits within 8 GB of RAM — the same memory footprint as a flagship Android phone. The specialized perception models (TorchXRayVision, NeuroKit2, ECG digitizer) are lightweight enough to run on mobile hardware today. This makes SLM MedTeacher a direct prototype for a fully on-device smartphone app, deployable to the 6+ billion mobile users in low-resource settings where reliable internet and GPU hardware are unavailable.
+**Smartphone roadmap:** SLM MedTeacher is designed from the ground up to reach a smartphone. MedGemma 1.5 4B at Q4_K_M quantization (~2.5 GB) already runs on iPhone 15 Pro and newer via llama.cpp and Apple's Neural Engine, and on 12 GB Android flagships (Samsung S24+, Pixel 9 Pro). The perception models are small enough for ONNX/TFLite conversion. Porting the full stack to a native app would bring clinical AI teaching to the 6+ billion people carrying capable hardware in settings where cloud AI is unavailable, unaffordable, or legally restricted for patient data.
 
 ---
 
