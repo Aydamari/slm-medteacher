@@ -1,0 +1,50 @@
+# Instruções Específicas para Exames e Imagens
+
+EXAM_SPECIFIC_PROMPTS = {
+    "rx": {
+        "pt": "GERE O LAUDO AGORA. Baseie-se na imagem e nos [DADOS DE SUPORTE] acima. Siga rigorosamente a estrutura do [INSTRUÇÃO DE LAUDO RADIOLÓGICO].",
+        "en": "GENERATE REPORT NOW. Base it on the image and [SUPPORTING DATA] above. Strictly follow the [RADIOLOGY REPORT INSTRUCTION] structure."
+    },
+    "ecg": {
+        "pt": """Analise o ECG e os dados de telemetria. Preencha cada campo abaixo com seus achados reais:
+
+**HD (Hipótese Diagnóstica):** achado crítico do exame (ex: FA, IAMCSST, BAVT, Flutter Atrial)
+**FC:** valor em bpm
+**Ritmo:** descrição do ritmo
+**Eixo:** eixo elétrico
+**Intervalos:** PR, QRS, QTc em ms
+**Onda P:** descrição
+**Complexo QRS:** descrição
+**Onda T:** descrição
+
+Sem preâmbulos. Priorize o achado mais grave se houver inconsistência.""",
+        "en": """Analyze the ECG and fill in each field with your actual findings:
+
+**HD (Diagnostic Hypothesis):** critical finding (e.g., AF, STEMI, complete AV block, Atrial Flutter)
+**HR:** value in bpm
+**Rhythm:** describe the rhythm
+**Axis:** electrical axis
+**Intervals:** PR, QRS, QTc in ms
+**P Wave:** description
+**QRS Complex:** description
+**T Wave:** description
+
+No preamble. Prioritize the most severe finding if there is inconsistency."""
+    },
+    "tc": {
+        "pt": "Instrução para TC: Analise a densidade das estruturas. Identifique massas, coleções, linfonodomegalias ou alterações parenquimatosas. Correlacione achados anatômicos com a clínica do paciente.",
+        "en": "CT Instruction: Analyze the density of structures. Identify masses, collections, lymphadenopathy, or parenchymal changes. Correlate anatomical findings with the patient's clinical presentation."
+    },
+    "lab": {
+        "pt": "Instrução para Laboratório: Analise os valores em relação aos referenciais. Identifique padrões (ex: inflamatório, infeccioso, anemia, disfunção orgânica). Correlacione os resultados entre si.",
+        "en": "Lab Instruction: Analyze values in relation to reference ranges. Identify patterns (e.g., inflammatory, infectious, anemia, organ dysfunction). Correlate the results with each other."
+    },
+    "general": {
+        "pt": "Instrução Geral de Arquivo: Extraia todos os dados clínicos relevantes, organize por prioridade e identifique qualquer valor ou imagem que represente risco imediato à vida (Red Flags).",
+        "en": "General File Instruction: Extract all relevant clinical data, organize by priority, and identify any value or image that represents an immediate life-threatening risk (Red Flags)."
+    },
+    "ecg_visual_fallback": {
+        "pt": "Sinal ECG indisponível. Olhe a IMAGEM e preencha APENAS estes três campos, sem acrescentar nenhum outro texto:\nRitmo: sinusal / fibrilação atrial / flutter / bloqueio AV / outro (especifique)\nFC estimada: número em bpm, ou escreva 'não estimável'\nAchado principal: único achado anormal relevante, ou escreva 'sem achado evidente'",
+        "en": "ECG signal unavailable. Look at the IMAGE and fill in ONLY these three fields, adding no other text:\nRhythm: sinus / atrial fibrillation / flutter / AV block / other (specify)\nEstimated HR: number in bpm, or write 'not estimable'\nMain finding: single most relevant abnormal finding, or write 'no evident finding'"
+    }
+}

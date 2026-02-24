@@ -1,0 +1,63 @@
+O pipeline efetivo do SLM MedTeacher foi desenhado para ser uma "perícia médica digital". Ele não apenas olha para a imagem, ele a desconstrói e a submete a três especialistas diferentes antes de entregar os dados ao MedGemma.
+
+  Aqui está o fluxo exato, do upload ao diagnóstico:
+
+
+  1. Entrada e Triagem (Frontend -> Backend)
+   * Captura Dinâmica: O navegador envia a imagem junto com a tag exam_types: ["ecg"].
+   * Roteamento: O perception_manager recebe os bytes da imagem e, ao detectar a tag "ecg", invoca o ecg_analyzer.
+
+
+  2. A Fase de Percepção: Os "Olhos" (Três Trilhas Paralelas)
+  Dentro do ecg_analyzer, a imagem passa por três processos simultâneos de IA:
+
+
+  Trilha A: Visão Direta (Modelo Nicholas0917 - BHF Winner)
+   * Processamento: A imagem é redimensionada para 224x224 e normalizada.
+   * Inferência: O modelo ConvNeXt-Base analisa os padrões visuais (formas das ondas, irregularidades rítmicas) sem converter para sinal.
+   * Saída: Retorna uma probabilidade para as 6 classes críticas (ex: AF, IAM, Normal).
+
+
+  Trilha B: Digitalização (Motor Ahus-AIM)
+   * Segmentação (U-Net): Identifica o que é traçado, o que é papel milimetrado e o que é texto.
+   * Dewarping (Correção): Remove inclinações e distorções da foto de celular, "alisando" o papel virtualmente.
+   * Extração de Leads: Isola as 12 derivações e converte a posição dos pixels em um tensor de voltagem matemática [12 canais, 5000 amostras].
+
+
+  Trilha C: Análise Elétrica (HuBERT + Queenbee)
+   * HuBERT Foundation: O sinal extraído pela Trilha B é enviado ao HuBERT, que analisa a semântica elétrica global do coração.
+   * Queenbee Transformer: O mesmo sinal é enviado ao Queenbee, especializado no dataset clínico PTB-XL, para buscar padrões rítmicos específicos.
+
+
+  3. O Veredito de Consenso (Votação 2 de 3)
+   * O backend coleta os resultados das Trilhas A, B e C.
+   * Lógica de Votação: O sistema aplica um peso maior a diagnósticos patológicos (Red Flags). Se 2 dos 3 modelos concordarem sobre uma arritmia (ex: Fibrilação Atrial), esse diagnóstico torna-se o Consenso de Percepção.
+   * Cálculo de FC: A frequência cardíaca é calculada matematicamente medindo a distância entre os picos R detectados no sinal digitalizado.
+
+
+  4. Camada de Segurança (Microsoft Presidio)
+   * O resumo técnico gerado (Ex: "Fibrilação Atrial, FC 105...") é enviado ao medical_anonymizer.
+   * Qualquer PII detectado no prompt ou nos achados é mascarado (ex: "Laudo do paciente [PACIENTE]").
+
+
+  5. Raciocínio Clínico (O "Cérebro" MedGemma)
+   * O MedGemma 1.5 4B (Q4_K_M) recebe:
+       1. O Bloco de Telemetria (Consenso da Percepção).
+       2. A Imagem Original (via camada de visão do MedGemma).
+       3. O Prompt do Usuário.
+   * Ele ancora o seu raciocínio nos dados brutos dos especialistas ("Os Olhos") para evitar alucinações visuais.
+
+
+  6. Saída Padronizada (Standardized Output)
+  A IA gera a resposta final seguindo estritamente a estrutura solicitada:
+   * HD (Hipótese Diagnóstica)
+   * FC
+   * Ritmo
+   * Eixo
+   * Intervalos (PR, QRS, QTc)
+   * Onda P, Complexo QRS, Onda T
+
+
+  ---
+  Resultado Final: Você recebe um diagnóstico fundamentado por três modelos de inteligência artificial de ponta, revisado por um LLM médico, em um processo que leva entre 30 a 60 segundos.
+

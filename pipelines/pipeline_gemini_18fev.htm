@@ -1,0 +1,89 @@
+<pre>
+  <b>1. Pipeline de Análise de ECG (Eletrocardiograma)</b>
+  Este é o fluxo mais complexo, dividido em duas etapas fundamentais: <b>Digitalização</b> (Imagem → Sinal) e <b>Classificação</b> (Sinal → Diagnóstico).
+
+  <font color="#6C7086"><i><b>Etapa A: Digitalizadores (Os Olhos)</b></i></font>
+  Os digitalizadores operam em <b>Série (Fallback)</b>. O sistema tenta o motor mais moderno e, se falhar, utiliza o motor de segurança.
+
+
+
+  <font color="#6C7086">┌───────────────────┬─────────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────┐</font>
+  <font color="#6C7086">│</font> <font color="#89B4FA"><b>Ferramenta</b></font>       <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Papel no Pipeline</b></font>                                                  <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Parâmetros de PC</b></font>                                                                  <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Status do Modelo</b></font>                                         <font color="#6C7086">│</font>
+  <font color="#6C7086">├───────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────┤</font>
+  <font color="#6C7086">│</font> **nnU-Net (SOTA …<font color="#6C7086"> │ </font><b>Motor Principal</b>. Segmentação profunda para separar traçados sobrep…<font color="#6C7086"> │ </font>Resolução nativa (sem redimensionamento), execução em GPU (12GB VRAM).            <font color="#6C7086"> │ </font><b>PENDENTE</b>: Pesos bloqueados pelo LFS do GitHub (Felix Kr… <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> **Ahus-AIM (Open…<font color="#6C7086"> │ </font><b>Fallback</b>. Digitalizador robusto de 12 derivações.                  <font color="#6C7086"> │ </font><b>Otimizado</b>: Gaussian Blur desativado; Sensibilidade aumentada (0.05); Dewarping se…<font color="#6C7086"> │ </font><b>CRÍTICO</b>: Arquivo <font color="#CBA6F7">ecg_segmentation_unet.pt</font> está com **0 by…
+  <font color="#6C7086">│</font>
+  <font color="#6C7086">└───────────────────┴─────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┘</font>
+
+
+
+  <font color="#6C7086"><i><b>Etapa B: Classificadores de Sinal (O Cérebro)</b></i></font>
+  Após a extração do sinal, estes modelos operam em <b>Paralelo</b>, e o resultado é decidido por um <b>Voto de Consenso</b>.
+
+
+
+  <font color="#6C7086">┌──────────────────┬───────────────────────────────────────────────────────┬───────────────────────────────────────────┬─────────────────────────────────────────────────────┐</font>
+  <font color="#6C7086">│</font> <font color="#89B4FA"><b>Modelo</b></font>          <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Especialidade</b></font>                                        <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Fluxo de Dados</b></font>                           <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Status do Modelo</b></font>                                    <font color="#6C7086">│</font>
+  <font color="#6C7086">├──────────────────┼───────────────────────────────────────────────────────┼───────────────────────────────────────────┼─────────────────────────────────────────────────────┤</font>
+  <font color="#6C7086">│</font> <b>CODE-15 (USP)</b>   <font color="#6C7086"> │ </font><b>Juiz Clínico</b>. Treinado em 345k pacientes brasileiros.<font color="#6C7086"> │ </font>Recebe vetor de 4096 pontos (Leads I-V6).<font color="#6C7086"> │ </font><b>CRÍTICO</b>: Arquivo <font color="#CBA6F7">resnet_code15.h5</font> está com <b>0 bytes</b>. <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>HuBERT ECG</b>      <font color="#6C7086"> │ </font>Foundation Model para semântica cardíaca.            <font color="#6C7086"> │ </font>Recebe sinal bruto de 500Hz.             <font color="#6C7086"> │ </font><b>✅ PRONTO</b>: 356MB (HuggingFace).                     <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Queenbee</b>        <font color="#6C7086"> │ </font>Especialista no dataset clínico PTB-XL.              <font color="#6C7086"> │ </font>Transformer 1D de alta precisão.         <font color="#6C7086"> │ </font><b>✅ PRONTO</b>: 57MB (HuggingFace).                      <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>ECGFounder (PKU)</b><font color="#6C7086"> │ </font>Detecção de 150 diagnósticos diferentes.             <font color="#6C7086"> │ </font>Net1D (MIT License).                     <font color="#6C7086"> │ </font><b>✅ PRONTO</b>: Carregado via HF Hub.                    <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>BHF (ConvNeXt)</b>  <font color="#6C7086"> │ </font>Análise Visual Direta (sem converter sinal).         <font color="#6C7086"> │ </font>Visão 2D (224x224).                      <font color="#6C7086"> │ </font><b>⚠ ALERTA</b>: Usando pesos ImageNet (confiança baixa).  <font color="#6C7086">│</font>
+  <font color="#6C7086">└──────────────────┴───────────────────────────────────────────────────────┴───────────────────────────────────────────┴─────────────────────────────────────────────────────┘</font>
+
+  ---
+
+
+  <b>2. Pipeline de Análise de Rx (Raio-X de Tórax)</b>
+  O pipeline de Rx é mais direto, utilizando um <b>Ensemble de Médias</b> de probabilidade.
+
+
+
+  <font color="#6C7086">┌─────────────────┬─────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────┐</font>
+  <font color="#6C7086">│</font> <font color="#89B4FA"><b>Ferramenta</b></font>     <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Papel no Pipeline</b></font>                              <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Parâmetros de PC</b></font>                                              <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Status do Modelo</b></font>                                               <font color="#6C7086">│</font>
+  <font color="#6C7086">├─────────────────┼─────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤</font>
+  <font color="#6C7086">│</font> <b>TorchXRayVision</b><font color="#6C7086"> │ </font>Orquestrador de 4 redes neurais especializadas.<font color="#6C7086"> │ </font>Resolução nativa (512px); Normalização dinâmica [-1024, 1024].<font color="#6C7086"> │ </font><b>✅ PRONTO</b>: Modelos (DenseNet/ResNet) baixados no primeiro uso. <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>NIH/CheXpert</b>   <font color="#6C7086"> │ </font>Detecção de 18 patologias (Pneumonia, etc).    <font color="#6C7086"> │ </font>Média ponderada por rótulo clínico.                           <font color="#6C7086"> │ </font><b>✅ PRONTO</b>.                                                     <font color="#6C7086">│</font>
+  <font color="#6C7086">└─────────────────┴─────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────┘</font>
+
+  ---
+
+
+  <b>3. Fluxo de Dados e Raciocínio (LLM Cloud)</b>
+  Como operamos com modelos grandes em nuvem (Gemini 2.5), o fluxo de dados foi configurado para <b>Zero Perda</b>:
+   1. <b>Imagem:</b> Enviada em alta definição (até 1024px).
+   2. <b>Sinal:</b> O vetor numérico completo (5000 pontos por derivação) é injetado no prompt.
+   3. <b>Contexto:</b> Janela de 8192 tokens garantida para que a LLM &quot;leia&quot; o ECG digitalizado antes de concluir.
+
+  ---
+
+  <b>4. Tabela de Sumarização e Pendências</b>
+
+
+
+  <font color="#6C7086">┌────────────────┬─────────────────┬────────────────────┬────────────────────────────────────────────────────┐</font>
+  <font color="#6C7086">│</font> <font color="#89B4FA"><b>Componente</b></font>    <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Ferramenta</b></font>     <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Status Atual</b></font>      <font color="#6C7086"> │ </font><font color="#89B4FA"><b>Ação Necessária</b></font>                                    <font color="#6C7086">│</font>
+  <font color="#6C7086">├────────────────┼─────────────────┼────────────────────┼────────────────────────────────────────────────────┤</font>
+  <font color="#6C7086">│</font> <b>Digitalização</b> <font color="#6C7086"> │ </font>nnU-Net (SOTA) <font color="#6C7086"> │ </font>❌ Incompleto     <font color="#6C7086"> │ </font>Baixar pesos oficiais do PhysioNet 2024.           <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Digitalização</b> <font color="#6C7086"> │ </font>Ahus-AIM       <font color="#6C7086"> │ </font>❌ Falha (0 bytes)<font color="#6C7086"> │ </font>Re-upload/Mover <font color="#CBA6F7">ecg_segmentation_unet.pt</font>.            <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Identificação</b> <font color="#6C7086"> │ </font>Lead Identifier<font color="#6C7086"> │ </font>✅ OK (23MB)      <font color="#6C7086"> │ </font>Nenhuma.                                           <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Classificação</b> <font color="#6C7086"> │ </font>CODE-15 (USP)  <font color="#6C7086"> │ </font>❌ Falha (0 bytes)<font color="#6C7086"> │ </font>Re-upload/Mover <font color="#CBA6F7">resnet_code15.h5</font>.                  <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Classificação</b> <font color="#6C7086"> │ </font>Hubert/Queenbee<font color="#6C7086"> │ </font>✅ OK             <font color="#6C7086"> │ </font>Nenhuma.                                           <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Classificação</b> <font color="#6C7086"> │ </font>ECGFounder     <font color="#6C7086"> │ </font>✅ OK             <font color="#6C7086"> │ </font>Nenhuma.                                           <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Classificação</b> <font color="#6C7086"> │ </font>Rx (Tórax)     <font color="#6C7086"> │ </font>✅ OK             <font color="#6C7086"> │ </font>Nenhuma.                                           <font color="#6C7086">│</font>
+  <font color="#6C7086">│</font> <b>Infraestrutura</b><font color="#6C7086"> │ </font>TensorFlow     <font color="#6C7086"> │ </font>✅ OK             <font color="#6C7086"> │ </font>Instalado automaticamente via <font color="#CBA6F7">ensure_dependencies</font>. <font color="#6C7086">│</font>
+  <font color="#6C7086">└────────────────┴─────────────────┴────────────────────┴────────────────────────────────────────────────────┘</font>
+
+
+
+  <b>Conclusão do Relatório</b>
+  O produto possui uma inteligência clínica instalada (Hubert, Queenbee, ECGFounder e Rx) que já supera qualquer modelo visual genérico. No entanto, o <b>fundamento da digitalização</b> (os arquivos vazios de 0 bytes) está impedindo que os
+  modelos de sinal recebam dados.
+
+
+  <b>O que falta no produto para ser 100% funcional:</b>
+   1. Materializar os arquivos <b>`ecg_segmentation_unet.pt`</b> e <b>`resnet_code15.h5`</b> (atualmente vazios no seu PC).
+   2. Finalizar a configuração de caminhos do <b>nnU-Net</b> assim que os pesos forem localizados.
+
+</pre>

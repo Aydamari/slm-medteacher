@@ -1,0 +1,39 @@
+{
+  "model_type": "ecg-transformer",
+  "architecture": {
+    "num_leads": 12,
+    "signal_length": 5000,
+    "patch_size": 50,
+    "embed_dim": 256,
+    "depth": 6,
+    "num_heads": 8,
+    "mlp_ratio": 4.0,
+    "dropout": 0.1,
+    "num_superclasses": 5,
+    "num_scp_codes": 44
+  },
+  "preprocessing": {
+    "sample_rate": 500,
+    "duration_seconds": 10,
+    "normalization": "per_lead_zscore"
+  },
+  "classes": {
+    "superclasses": ["NORM", "MI", "STTC", "CD", "HYP"],
+    "superclass_descriptions": {
+      "NORM": "Normal ECG",
+      "MI": "Myocardial Infarction",
+      "STTC": "ST/T Change",
+      "CD": "Conduction Disturbance",
+      "HYP": "Hypertrophy"
+    }
+  },
+  "training": {
+    "dataset": "PTB-XL v1.0.3",
+    "train_samples": 17084,
+    "val_samples": 2146,
+    "test_samples": 2158,
+    "best_epoch": 10,
+    "best_auc": 0.8913
+  },
+  "license": "Apache-2.0"
+}

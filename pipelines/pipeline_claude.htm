@@ -1,0 +1,724 @@
+<pre><u style="text-decoration-style:solid"><i><b>ANÁLISE COMPLETA DO PRODUTO SLM MEDTEACHER</b></i></u>                                                                                                                                                                                                  
+   
+  <b>1. O QUE FAZ ESTE PRODUTO</b>                                                                                                                                                                                                                   
+                                                                     
+  O <b>SLM</b> <b>MedTeacher</b> é um assistente clínico de inteligência artificial que roda <b>localmente</b> no computador do profissional de saúde, com opção de fallback para a nuvem. Seu propósito é auxiliar na <b>interpretação</b> <b>de</b> <b>exames</b> <b>médicos</b> e no
+  <b>raciocínio</b> <b>clínico</b> <b>estruturado</b>.
+
+  <b>Capacidades</b> <b>Funcionais</b>
+
+  ┌───────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │          Recurso          │                             Tecnologia Real                              │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Chat clínico textual      │ MedGemma 4B/27B (local, Ollama) ou Gemini 2.5 Flash (nuvem)              │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Análise de ECG por imagem │ Triple ensemble: ConvNeXt (BHF) + HuBERT + QueenBee + Ahus-AIM digitizer │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Análise de Raio-X/TC      │ TorchXRayVision DenseNet121 (classificação multi-label)                  │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Extração de laudos/lab    │ PaddleOCR + heurísticas regex para estruturação                          │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Anonimização de PII       │ Microsoft Presidio com SpaCy (PT/EN)                                     │
+  ├───────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ Gerência de sessões       │ JSONL em disco, compressão de contexto inteligente, expiração 24h        │
+  └───────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+  <b>Arquitetura</b> <b>de</b> <b>Alto</b> <b>Nível</b>
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  FRONTEND (medteacher.html + JS)                                │
+  │  • Seletor de modo (Raciocínio Clínico / Comunicação)           │
+  │  • Checkboxes de tipo de exame (ECG, RX, TC, Lab)               │
+  │  • Upload de arquivos + Chat                                     │
+  └─────────────────────────┬───────────────────────────────────────┘
+                            │ REST API (FastAPI)
+  ┌─────────────────────────▼───────────────────────────────────────┐
+  │  BACKEND (main.py)                                              │
+  │                                                                  │
+  │  /session/create  →  GerenciadorSessoes                         │
+  │  /chat            →  Ollama ou Gemini (texto puro)              │
+  │  /chat/multimodal →  PerceptionManager + Ollama                 │
+  │                      │                                          │
+  │  ┌──────────────────▼─────────────────────────────┐            │
+  │  │  PERCEPTION MANAGER                             │            │
+  │  │  ├── ECGAnalyzer (Triple Ensemble + Ahus-AIM)   │            │
+  │  │  ├── XRayAnalyzer (TorchXRayVision)             │            │
+  │  │  └── DocumentAnalyzer (PaddleOCR)               │            │
+  │  └─────────────────────────────────────────────────┘            │
+  │                                                                  │
+  │  ContextManager  │  MedicalAnonymizer  │  IntentDetector        │
+  └─────────────────────────────────────────────────────────────────┘
+
+
+  <b>Stack</b> <b>Tecnológica</b> <b>Detalhada</b>
+
+  - <b>Servidor</b>: FastAPI 0.115 + Uvicorn
+  - <b>LLMs</b>: Ollama (MedGemma 4B/27B quantizado Q4_K_M) ou Google Gemini 2.5 Flash via API REST
+  - <b>Visão</b> <b>Computacional</b>: PyTorch, TIMM (ConvNeXt), Transformers (HuBERT, QueenBee), TorchXRayVision, OpenCV
+  - <b>ECG</b> <b>Digitization</b>: Ahus-AIM (UNet segmentação, Hough Transform, Thin Plate Spline, Hungarian Algorithm)
+  - <b>OCR</b>: PaddleOCR v3.4+
+  - <b>Privacidade</b>: Microsoft Presidio + SpaCy (pt_core_news_lg, en_core_web_lg)
+  - <b>Frontend</b>: Vanilla HTML5/JS/CSS, sem framework
+
+  ---
+  <b>2.</b> <b>PIPELINE</b> <b>DE</b> <b>ANÁLISE</b> <b>DE</b> <b>ECG</b> <b>—</b> <b>DESCRIÇÃO</b> <b>DETALHADA</b>
+
+  A pipeline de ECG é o componente mais complexo do sistema. Possui <b>duas</b> <b>camadas</b> que operam em paralelo, mas com uma dependência crítica entre elas.
+
+  <b>2.1.</b> <b>Fluxo</b> <b>Completo</b> <b>Detalhado</b>
+
+  Usuário faz upload de ECG (JPEG/PNG)
+         │
+         ▼
+  [1] main.py:chat_multimodal() ─────────────────────────────────────
+         │
+         ├── multimodal_processor.process_files()
+         │     └── image_processor.process_image()
+         │           ├── Validação de formato e tamanho (&lt;10MB)
+         │           ├── Resize para max 512×512 (Lanczos)
+         │           ├── Compressão JPEG quality=85
+         │           └── Conversão para base64
+         │
+         ├── perception_manager.analyze_file(content, filename, &quot;ecg&quot;)
+         │     └── ecg_analyzer.analyze(image_bytes) ◄━━━━━━━━━━━━━━ PIPELINE PRINCIPAL
+         │
+         ├── EXAM_SPECIFIC_PROMPTS[&quot;ecg&quot;][&quot;pt&quot;] ← instrução de template HD/FC/Ritmo
+         │
+         └── medical_anonymizer.anonymize(combined_text)
+                │
+                ▼
+         Contexto montado → Enviado ao LLM (Ollama/Gemini)
+
+
+  [2] ecg_analyzer.analyze(image_bytes) ──────────────────────────────
+         │
+         ├── [Passo A] _predict_bhf(image_bytes) ◄━━ MODELO DE VISÃO (funciona sozinho)
+         │     ├── cv2.imdecode() → RGB
+         │     ├── PIL Image → Resize 224×224
+         │     ├── Normalize([0.485,0.456,0.406], [0.229,0.224,0.225])
+         │     ├── ConvNeXt Base (timm, pretrained IN-22K→IN-1K, fine-tuned 6 classes)
+         │     ├── Softmax → argmax
+         │     └── Retorna: {&quot;label&quot;: &quot;AF&quot;|&quot;1dAVb&quot;|&quot;RBBB&quot;|&quot;LBBB&quot;|&quot;SB&quot;|&quot;ST&quot;, &quot;prob&quot;: 0.XX}
+         │
+         ├── [Passo B] _extract_signal(image_bytes) ◄━━━━━━━━━━━ PONTO DE FALHA
+         │     │
+         │     ├── if self.digitizer is None → return None ◄━━━━━ CAUSA RAIZ DO ERRO
+         │     │
+         │     ├── cv2.imdecode() → RGB → torch.Tensor [1,3,H,W]
+         │     ├── self.digitizer(img_tensor, layout_should_include_substring=None)
+         │     │     │
+         │     │     └── InferenceWrapper.forward() ◄━━━━━━━ AHUS-AIM PIPELINE
+         │     │           │
+         │     │           ├── _check_image_dimensions() → valida [1,3,H,W]
+         │     │           ├── min_max_normalize() → escala [0,1]
+         │     │           ├── _resample_image() → sem resample (resample_size=None)
+         │     │           │
+         │     │           ├── _get_feature_maps(image) ◄━━━━━━━ SEGMENTAÇÃO SEMÂNTICA
+         │     │           │     ├── UNet(3→4 canais, depth=2, dims=[32→320])
+         │     │           │     ├── Softmax dim=1 → 4 mapas de probabilidade
+         │     │           │     │     ├── Canal 0: GRADE (milimetrada)
+         │     │           │     │     ├── Canal 1: TEXTO+FUNDO
+         │     │           │     │     ├── Canal 2: SINAL ECG
+         │     │           │     │     └── Canal 3: FUNDO
+         │     │           │     └── process_sparse_prob() × 3 → normalização
+         │     │           │
+         │     │           ├── PerspectiveDetector(grid_prob) ◄━━ CORREÇÃO PERSPECTIVA
+         │     │           │     ├── to_flat_greyscale() → binarize()
+         │     │           │     ├── Hough Transform (2 passes, num_thetas=250)
+         │     │           │     │     ├── Pass 1: busca em [-π/4, 3π/4]
+         │     │           │     │     ├── calculate_line_variances() → melhor θ
+         │     │           │     │     └── Pass 2: refina em janela ±ε
+         │     │           │     └── Retorna: {rho_min, rho_max, theta_min/max_h/v}
+         │     │           │
+         │     │           ├── Cropper.forward(signal_prob, params) ◄━━ RECORTE
+         │     │           │     ├── Calcula bins percentilares (2%, 98%)
+         │     │           │     ├── Hough lines → interseções → 4 pontos fonte
+         │     │           │     └── Retorna: source_points [4,2]
+         │     │           │
+         │     │           ├── _align_feature_maps() ◄━━ TRANSFORMAÇÃO PERSPECTIVA
+         │     │           │     ├── Cropper.apply_perspective() × 4
+         │     │           │     │     └── torchvision.transforms.functional.perspective()
+         │     │           │     ├── _rotate_on_resample() (se height &gt; width)
+         │     │           │     └── _crop_y() → corte vertical por probabilidade
+         │     │           │
+         │     │           ├── PixelSizeFinder(aligned_grid_prob) ◄━━ CALIBRAÇÃO
+         │     │           │     ├── Autocorrelação 1D (eixo horizontal e vertical)
+         │     │           │     ├── Grid search zoom progressivo (10 iterações)
+         │     │           │     └── Retorna: (mm/pixel_x, mm/pixel_y)
+         │     │           │
+         │     │           ├── Dewarper.fit(grid_prob, avg_pixel_per_mm) ◄━━ DEWARPING
+         │     │           │     ├── Spherical Harmonic Kernel (m=4)
+         │     │           │     ├── Conv2D → peak_local_max()
+         │     │           │     ├── KNN (k=5) → filtro direcional → grafo
+         │     │           │     ├── Largest connected component
+         │     │           │     ├── Adam optimizer (1000 steps) → layout ótimo
+         │     │           │     └── ThinPlateSpline (torch-tps)
+         │     │           │
+         │     │           ├── Dewarper.transform(signal_prob) → imagem corrigida
+         │     │           │
+         │     │           ├── SignalExtractor(aligned_signal_prob) ◄━━ EXTRAÇÃO DE SINAIS
+         │     │           │     ├── _iterative_extraction() (max 4 iterações)
+         │     │           │     │     ├── _label_regions() → skimage.measure.label
+         │     │           │     │     ├── Para cada região:
+         │     │           │     │     │     ├── _extract_line_from_region() → média ponderada
+         │     │           │     │     │     └── _classify_line() → aceita/rejeita (95% in-mask)
+         │     │           │     │     └── _refine_fmap_by_removal() → remove rejeitadas
+         │     │           │     ├── _autodetect_num_peaks() → nº esperado de derivações
+         │     │           │     ├── Filtro: linhas com &lt; min_line_width → descartadas
+         │     │           │     └── match_and_merge_lines() ◄━━ HUNGARIAN MATCHING
+         │     │           │           ├── extract_graph_params() → coordenadas/alturas
+         │     │           │           ├── compute_cost_matrix() → distância + Δheight
+         │     │           │           ├── scipy.linear_sum_assignment(cost_matrix)
+         │     │           │           ├── build_match_graph() → componentes conexas (BFS)
+         │     │           │           └── merge_components() → linhas finais mescladas
+         │     │           │
+         │     │           └── LeadIdentifier(signals, text_prob, mm/px) ◄━━ IDENTIFICAÇÃO
+         │     │                 ├── _merge_nonoverlapping_lines() → mescla linhas sem overlap
+         │     │                 ├── normalize() → pixel → mV (1000× mm/px)
+         │     │                 │     └── _interpolate_lines() → resample para 5000 amostras
+         │     │                 ├── UNet de texto (1→13 canais) → detecta labels escritos
+         │     │                 ├── _extract_lead_points() → centróide por canal
+         │     │                 ├── _match_layout() → Hungarian matching contra layouts YML
+         │     │                 │     ├── lead_layouts_reduced.yml (6×1 precordial + cabrera)
+         │     │                 │     ├── Procrustes alignment (scale, translate, flip)
+         │     │                 │     └── cost = residual × scaling_factor
+         │     │                 └── _canonicalize_lines() → reordena para 12 derivações padrão
+         │     │                       ├── I, II, III, aVR, aVL, aVF, V1-V6
+         │     │                       ├── Flip handling (imagem de ponta-cabeça)
+         │     │                       └── Rhythm lead matching (DII/V1/V5 por cosseno)
+         │     │
+         │     ├── got_values[&quot;signal&quot;][&quot;canonical_lines&quot;]
+         │     └── Retorna: numpy array [12, 5000] ou None
+         │
+         ├── [Passo C] _predict_hubert(signal_np)
+         │     ├── _prepare_signal() → resample para 5000 pontos
+         │     └── STUB: retorna {&quot;label&quot;: &quot;Sinusal/Normal&quot;, &quot;prob&quot;: 0.85} ◄━━ HARDCODED
+         │
+         ├── [Passo D] _predict_queenbee(signal_np)
+         │     ├── _prepare_signal() → resample para 5000 pontos
+         │     ├── AutoModel(&quot;Trustcat/queenbee-ecg-transformer&quot;)
+         │     ├── output.logits ou output[0] → Softmax → argmax
+         │     └── Retorna: {&quot;label&quot;: ptbxl_classes[idx % 5], &quot;prob&quot;: probs.max()}
+         │
+         ├── [Passo E] _consensus_vote([bhf, hubert, queenbee])
+         │     ├── Remove labels &quot;Error&quot;
+         │     └── max(set(labels), key=labels.count) → voto por maioria
+         │
+         └── [Passo F] _estimate_hr(signal_np)
+               └── STUB: return 75 ◄━━ HARDCODED SEMPRE 75 BPM
+
+
+  <b>2.2.</b> <b>Resumo</b> <b>para</b> <b>o</b> <b>LLM</b> <b>(get_summary_for_prompt)</b>
+
+  SE SUCESSO:
+    &quot;[DADOS DE TELEMETRIA DO ECG]:
+     DIAGNÓSTICO PELOS MODELOS: {rhythm}
+     FREQUÊNCIA CARDÍACA: {hr} bpm
+     DETALHES: {findings}
+     ---------------------------&quot;
+
+  SE ERRO:
+    &quot;\n[SINAL DE ECG]: Erro técnico na extração: {error_message}\n&quot;
+
+
+  Este texto + <font color="#5769F7">EXAM_SPECIFIC_PROMPTS[&quot;ecg&quot;][&quot;pt&quot;]</font> são combinados e enviados ao LLM, que produz a saída formatada HD/FC/Ritmo.
+
+  ---
+  <b>3.</b> <b>DIAGNÓSTICO</b> <b>DO</b> <b>ERRO:</b> <font color="#5769F7"><b>HD:</b></font> <font color="#5769F7"><b>[Falha</b></font> <font color="#5769F7"><b>na</b></font> <font color="#5769F7"><b>extração</b></font> <font color="#5769F7"><b>de</b></font> <font color="#5769F7"><b>sinais.</b></font> <font color="#5769F7"><b>Pipeline</b></font> <font color="#5769F7"><b>incompleta.]</b></font>
+
+  <b>3.1.</b> <b>Rastreamento</b> <b>Completo</b> <b>do</b> <b>Erro</b>
+
+  <b>O</b> <b>que</b> <b>o</b> <b>usuário</b> <b>vê</b> <b>não</b> <b>é</b> <b>um</b> <b>erro</b> <b>do</b> <b>sistema</b> — é a resposta do LLM. A cadeia causal completa:
+
+                                      ┌──────────────────────────────────────┐
+                                      │  ecg_analyzer.py:91                  │
+                                      │  signal_np = self._extract_signal()  │
+                                      │  if signal_np is None:               │
+                                      │      return {&quot;error&quot;: &quot;Falha na      │
+                                      │       extração de sinais. Pipeline   │
+                                      │       incompleta.&quot;}                  │
+                                      └───────────────┬──────────────────────┘
+                                                      │
+                                      ┌───────────────▼──────────────────────┐
+                                      │  ecg_analyzer.py:175-176             │
+                                      │  get_summary_for_prompt():           │
+                                      │  → &quot;[SINAL DE ECG]: Erro técnico     │
+                                      │     na extração: Falha na extração   │
+                                      │     de sinais. Pipeline incompleta.&quot; │
+                                      └───────────────┬──────────────────────┘
+                                                      │
+                                      ┌───────────────▼──────────────────────┐
+                                      │  main.py:476-479                     │
+                                      │  perception_block + instruction_block│
+                                      │  = [texto do erro]                   │
+                                      │  + &quot;Analise o ECG... RIGOROSAMENTE   │
+                                      │     seguindo este formato:           │
+                                      │     **HD**: [...] **FC**: [...]&quot;      │
+                                      └───────────────┬──────────────────────┘
+                                                      │
+                                      ┌───────────────▼──────────────────────┐
+                                      │  LLM (MedGemma/Gemini)               │
+                                      │  Recebe: erro + instrução de formato │
+                                      │  Produz:                             │
+                                      │    HD: [Falha na extração de sinais] │
+                                      │    FC: [Não aplicável]               │
+                                      │    Ritmo: [Não aplicável]            │
+                                      │    ...                               │
+                                      └──────────────────────────────────────┘
+
+
+  <b>3.2.</b> <b>Por</b> <b>Que</b> <font color="#5769F7"><b>_extract_signal()</b></font><b> Retorna</b> <b>None</b>
+
+  Existem <b>3</b> <b>cenários</b> mutuamente exclusivos:
+
+  <b>Cenário</b> <b>A:</b> <font color="#5769F7"><b>self.digitizer</b></font><b> nunca</b> <b>foi</b> <b>criado</b> <b>(mais</b> <b>provável)</b>
+
+  <b>Ponto</b> <b>no</b> <b>código</b>: <font color="#5769F7">ecg_analyzer.py:149</font>
+  <font color="#3465A4">def</font><font color="#C4A000"> _extract_signal(self,</font> <font color="#C4A000">image_bytes):</font>
+      <font color="#3465A4">if</font> <font color="#3465A4">not</font> self.digitizer: <font color="#3465A4">return</font> <font color="#3465A4">None</font>   <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">self.digitizer</font> <font color="#4E9A06">é</font> <font color="#4E9A06">None</font>
+
+  <b>Razão</b> <b>1</b> <b>—</b> <b>Falha</b> <b>de</b> <b>importação</b> (<font color="#5769F7">ecg_analyzer.py:24-27</font>):
+  <font color="#3465A4">try</font>:
+      <font color="#3465A4">from</font> src.model.inference_wrapper <font color="#3465A4">import</font> InferenceWrapper
+  <font color="#3465A4">except</font> ImportError:
+      InferenceWrapper = <font color="#3465A4">None</font>  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">se</font> <font color="#4E9A06">QUALQUER</font> <font color="#4E9A06">import</font> <font color="#4E9A06">transitivo</font> <font color="#4E9A06">falhar</font>
+
+  O <font color="#5769F7">InferenceWrapper</font> importa <font color="#5769F7">src.utils</font>, que por sua vez importa:
+  - <font color="#5769F7">ray.tune.Stopper</font> — <b>RAY</b> <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">networkx</font> (usado em <font color="#5769F7">dewarper.py</font>) — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">sklearn.neighbors.NearestNeighbors</font> — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">torch_tps.ThinPlateSpline</font> — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">matplotlib</font> — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">timm</font> — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">presidio_analyzer</font>, <font color="#5769F7">presidio_anonymizer</font> — <b>NÃO</b> <b>ESTÃO</b> <b>NO</b> <b>requirements.txt</b>
+  - <font color="#5769F7">torchxrayvision</font> — <b>NÃO</b> <b>ESTÁ</b> <b>NO</b> <b>requirements.txt</b>
+
+  A <b>cadeia</b> <b>de</b> <b>importação</b> é:
+  1. <font color="#5769F7">ecg_analyzer.py</font> → <font color="#5769F7">from</font> <font color="#5769F7">src.model.inference_wrapper</font> <font color="#5769F7">import</font> <font color="#5769F7">InferenceWrapper</font>
+  2. <font color="#5769F7">inference_wrapper.py</font> → <font color="#5769F7">from</font> <font color="#5769F7">src.utils</font> <font color="#5769F7">import</font> <font color="#5769F7">import_class_from_path</font>
+  3. <font color="#5769F7">src/utils.py</font> → <font color="#5769F7">from</font> <font color="#5769F7">ray.tune</font> <font color="#5769F7">import</font> <font color="#5769F7">Stopper</font> ← <font color="#5769F7"><b>ray</b></font><b> não</b> <b>instalado</b> <b>=</b> <b>ImportError</b>
+
+  Mesmo que <font color="#5769F7">ray</font> estivesse instalado, quando <font color="#5769F7">_init_digitizer()</font> tenta instanciar os sub-módulos, eles importam:
+  - <font color="#5769F7">dewarper.py</font> → <font color="#5769F7">import</font> <font color="#5769F7">networkx</font> <font color="#5769F7">as</font> <font color="#5769F7">nx</font> + <font color="#5769F7">from</font> <font color="#5769F7">torch_tps</font> <font color="#5769F7">import</font> <font color="#5769F7">ThinPlateSpline</font> + <font color="#5769F7">from</font> <font color="#5769F7">sklearn.neighbors</font> <font color="#5769F7">import</font> <font color="#5769F7">NearestNeighbors</font>
+  - <font color="#5769F7">signal_extractor.py</font> → <font color="#5769F7">import</font> <font color="#5769F7">matplotlib.pyplot</font> <font color="#5769F7">as</font> <font color="#5769F7">plt</font>
+
+  <b>Razão</b> <b>2</b> <b>—</b> <b>Exceção</b> <b>silenciosa</b> <b>em</b> <font color="#5769F7"><b>_init_digitizer()</b></font> (<font color="#5769F7">ecg_analyzer.py:64-68</font>):
+  <font color="#3465A4">if</font> InferenceWrapper:
+      <font color="#3465A4">try</font>:
+          self._init_digitizer()
+      <font color="#3465A4">except</font> Exception <font color="#3465A4">as</font> e:
+          logger.error(<font color="#CC0000">f&quot;Erro</font> <font color="#CC0000">ao</font> <font color="#CC0000">configurar</font> <font color="#CC0000">Digitizer:</font> <font color="#CC0000">{e}&quot;</font>)
+          <font color="#4E9A06">#</font> <font color="#4E9A06">self.digitizer</font> <font color="#4E9A06">permanece</font> <font color="#4E9A06">None</font> <font color="#4E9A06">—</font> <font color="#4E9A06">erro</font> <font color="#4E9A06">engolido</font> <font color="#4E9A06">silenciosamente</font>
+
+  Causas possíveis de exceção em <font color="#5769F7">_init_digitizer()</font>:
+  - Arquivo de pesos <font color="#5769F7">ecg_segmentation_unet.pt</font> não encontrado ou corrompido
+  - Arquivo de pesos <font color="#5769F7">lead_name_unet_weights_07072025.pt</font> não encontrado
+  - Incompatibilidade de checkpoint (keys com <font color="#5769F7">_orig_mod.</font> prefix)
+  - YAML config files ausentes
+
+  <b>Cenário</b> <b>B:</b> <b>Digitizer</b> <b>funciona</b> <b>mas</b> <font color="#5769F7"><b>canonical_lines</b></font><b> é</b> <b>None</b>
+
+  <b>Ponto</b> <b>no</b> <b>código</b>: <font color="#5769F7">ecg_analyzer.py:155-156</font>
+  canonical = got_values.get(<font color="#CC0000">&quot;signal&quot;</font>, {}).get(<font color="#CC0000">&quot;canonical_lines&quot;</font>)
+  <font color="#3465A4">return</font> canonical.cpu().numpy() <font color="#3465A4">if</font> canonical <font color="#3465A4">is</font> <font color="#3465A4">not</font> <font color="#3465A4">None</font> <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+
+  Isto ocorre quando <font color="#5769F7">LeadIdentifier.__call__()</font> retorna <font color="#5769F7">canonical_lines</font> <font color="#5769F7">=</font> <font color="#5769F7">None</font> — o que acontece apenas se <font color="#5769F7">len(detected)</font> <font color="#5769F7">&lt;=</font> <font color="#5769F7">2</font> (<font color="#5769F7">lead_identifier.py:478-480</font>):
+  <font color="#3465A4">if</font> <font color="#06989A">len</font>(detected) &lt;= <font color="#4E9A06">2</font>:
+      match = {<font color="#CC0000">&quot;cost&quot;</font>: <font color="#06989A">float</font>(<font color="#CC0000">&quot;inf&quot;</font>)}
+      canonical_lines = <font color="#3465A4">None</font>  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">definido</font> <font color="#4E9A06">mas</font> <font color="#4E9A06">NUNCA</font> <font color="#4E9A06">usado</font>
+
+  <b>Porém</b>, olhando o código mais cuidadosamente (<font color="#5769F7">lead_identifier.py:484-494</font>):
+  <font color="#3465A4">if</font> <font color="#CC0000">&quot;layout&quot;</font> <font color="#3465A4">not</font> <font color="#3465A4">in</font> match:
+      match[<font color="#CC0000">&quot;layout&quot;</font>] = <font color="#06989A">list</font>(layouts.keys())[<font color="#4E9A06">0</font>]  <font color="#4E9A06">#</font> <font color="#4E9A06">fallback</font>
+  canonical_lines = self._canonicalize_lines(lines.clone(), match)
+  <font color="#3465A4">return</font> {
+      ...
+      <font color="#CC0000">&quot;canonical_lines&quot;</font>: canonical_lines,  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">sempre</font> <font color="#4E9A06">retorna</font> <font color="#4E9A06">algo</font> <font color="#4E9A06">(pode</font> <font color="#4E9A06">ter</font> <font color="#4E9A06">NaN)</font>
+  }
+
+  O <font color="#5769F7">LeadIdentifier</font> na verdade <b>sempre</b> <b>retorna</b> <font color="#5769F7"><b>canonical_lines</b></font> (mesmo que cheio de NaN). Então este cenário é menos provável do que o Cenário A, a não ser que <font color="#5769F7">layouts</font> esteja vazio e <font color="#5769F7">list(layouts.keys())[0]</font> cause <font color="#5769F7">IndexError</font>.
+
+  <b>Cenário</b> <b>C:</b> <b>O</b> <b>digitizer</b> <b>levanta</b> <b>exceção</b> <b>durante</b> <font color="#5769F7"><b>forward()</b></font>
+
+  Se <font color="#5769F7">InferenceWrapper.forward()</font> levantar qualquer exceção (tensor com dimensões inesperadas, divisão por zero no <font color="#5769F7">PixelSizeFinder</font>, linhas paralelas no <font color="#5769F7">Cropper</font>, etc.), ela propagaria para <font color="#5769F7">_extract_signal()</font> e seria capturada pelo <font color="#5769F7">try/except</font>
+  genérico em <font color="#5769F7">analyze()</font> (<font color="#5769F7">ecg_analyzer.py:108-110</font>), que retornaria <font color="#5769F7">{&quot;error&quot;:</font> <font color="#5769F7">str(e)}</font> — uma mensagem diferente da observada.
+
+  Porém, como o <font color="#5769F7">_extract_signal()</font> <b>não</b> <b>tem</b> <b>try/except</b> <b>interno</b>, se a exceção ocorre lá dentro, ela vai direto para o <font color="#5769F7">except</font> do <font color="#5769F7">analyze()</font>, resultando em uma mensagem de erro diferente (o <font color="#5769F7">str(e)</font> da exceção real). Isso significa que <b>o</b> <b>erro</b>
+  <b>&quot;Falha</b> <b>na</b> <b>extração</b> <b>de</b> <b>sinais.</b> <b>Pipeline</b> <b>incompleta.&quot;</b> <b>só</b> <b>ocorre</b> <b>quando</b> <font color="#5769F7"><b>self.digitizer</b></font><b> é</b> <font color="#5769F7"><b>None</b></font>.
+
+  ---
+  <b>4.</b> <b>TODOS</b> <b>OS</b> <b>ERROS</b> <b>E</b> <b>PONTOS</b> <b>FRACOS</b> <b>IDENTIFICADOS</b>
+
+  <b>ERROS</b> <b>CRÍTICOS</b> <b>(Causam</b> <b>falha</b> <b>funcional)</b>
+
+  <b>E1.</b> <b>Dependências</b> <b>ausentes</b> <b>no</b> <b>requirements.txt</b> <b>—</b> <b>GRAVIDADE:</b> <b>BLOQUEANTE</b>
+
+  O <font color="#5769F7">requirements.txt</font> está <b>drasticamente</b> <b>incompleto</b>. Bibliotecas usadas no código mas ausentes:
+
+  ┌─────────────────────┬──────────────────────────────────────┬────────────────────────────────────────────────┐
+  │     Biblioteca      │               Usada em               │                    Para quê                    │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">ray</font>                 │ <font color="#5769F7">src/utils.py:10</font>                      │ <font color="#5769F7">from</font> <font color="#5769F7">ray.tune</font> <font color="#5769F7">import</font> <font color="#5769F7">Stopper</font>                   │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">networkx</font>            │ <font color="#5769F7">dewarper.py:5</font>                        │ Grafo de pontos de grade                       │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">scikit-learn</font>        │ <font color="#5769F7">dewarper.py:9</font>                        │ KNN para filtragem de pontos                   │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">torch-tps</font>           │ <font color="#5769F7">dewarper.py:11</font>                       │ Thin Plate Spline dewarping                    │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">matplotlib</font>          │ <font color="#5769F7">signal_extractor.py:4</font>, <font color="#5769F7">dewarper.py:4</font> │ Debug plots (mas importado incondicionalmente) │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">timm</font>                │ <font color="#5769F7">ecg_analyzer.py:14</font>                   │ ConvNeXt (BHF model)                           │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">presidio-analyzer</font>   │ <font color="#5769F7">security.py:3</font>                        │ Anonimização                                   │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">presidio-anonymizer</font> │ <font color="#5769F7">security.py:4</font>                        │ Anonimização                                   │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">spacy</font>               │ <font color="#5769F7">security.py:6</font>                        │ NLP para Presidio                              │
+  ├─────────────────────┼──────────────────────────────────────┼────────────────────────────────────────────────┤
+  │ <font color="#5769F7">torchxrayvision</font>     │ <font color="#5769F7">xray_analyzer.py:3</font>                   │ Análise de Raio-X                              │
+  └─────────────────────┴──────────────────────────────────────┴────────────────────────────────────────────────┘
+
+  <b>Impacto</b> <b>direto</b>: <font color="#5769F7">from</font> <font color="#5769F7">src.utils</font> <font color="#5769F7">import</font> <font color="#5769F7">import_class_from_path</font> falha porque <font color="#5769F7">src/utils.py</font> importa <font color="#5769F7">ray.tune.Stopper</font> no topo do arquivo. Isso faz <font color="#5769F7">InferenceWrapper</font> <font color="#5769F7">=</font> <font color="#5769F7">None</font>, e portanto <font color="#5769F7">self.digitizer</font> <font color="#5769F7">=</font> <font color="#5769F7">None</font>, e portanto <b>toda</b> <b>análise</b> <b>de</b> <b>ECG</b> <b>falha</b>
+  <b> sempre</b>.
+
+  <b>E2.</b> <b>O</b> <b>layout</b> <b>YAML</b> <font color="#5769F7"><b>lead_layouts_reduced.yml</b></font><b> só</b> <b>tem</b> <b>2</b> <b>layouts</b> <b>(6×1)</b> <b>—</b> <b>GRAVIDADE:</b> <b>ALTA</b>
+
+  O arquivo contém apenas:
+  - <font color="#5769F7">precordial_6x1</font> (V1-V6)
+  - <font color="#5769F7">cabrera_6x1_limb</font> (aVL, I, -aVR, II, aVF, III)
+
+  <b>O</b> <b>formato</b> <b>padrão</b> <b>de</b> <b>ECG</b> <b>de</b> <b>12</b> <b>derivações</b> <b>(3×4</b> <b>+</b> <b>rhythm</b> <b>strip)</b> não está presente. A maioria absoluta dos ECGs reais usam layout 3×4+1 ou 4×3+1, que não será reconhecido.
+
+  Existe <font color="#5769F7">lead_layouts_all.yml</font> e <font color="#5769F7">lead_layouts_george-moody-2024.yml</font> no diretório de config, mas o código aponta para <font color="#5769F7">lead_layouts_reduced.yml</font>:
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:79</font>
+  cfg.LAYOUT_IDENTIFIER.config_path = <font color="#06989A">str</font>(AHUS_AIM_DIR / <font color="#CC0000">&apos;src/config/lead_layouts_reduced.yml&apos;</font>)
+
+  <b>E3.</b> <b>BHF</b> <b>Model</b> <b>usa</b> <b>pesos</b> <b>genéricos</b> <b>ImageNet,</b> <b>não</b> <b>pesos</b> <b>cardiológicos</b> <b>—</b> <b>GRAVIDADE:</b> <b>ALTA</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:51</font>
+  self.bhf_model = timm.create_model(<font color="#CC0000">&quot;convnext_base.fb_in22k_ft_in1k&quot;</font>,
+                                      pretrained=<font color="#3465A4">True</font>, num_classes=<font color="#4E9A06">6</font>)
+
+  Isto carrega um ConvNeXt <b>pré-treinado</b> <b>em</b> <b>ImageNet</b> e <b>troca</b> <b>a</b> <b>cabeça</b> <b>para</b> <b>6</b> <b>classes</b>, mas <b>sem</b> <b>fine-tuning</b> <b>com</b> <b>dados</b> <b>de</b> <b>ECG</b>. Os pesos da camada de classificação são <b>aleatórios</b>. As predições de &quot;1dAVb&quot;, &quot;RBBB&quot;, &quot;LBBB&quot;, &quot;SB&quot;, &quot;ST&quot;, &quot;AF&quot; são
+  essencialmente <b>ruído</b> <b>aleatório</b>.
+
+  O nome &quot;BHF Winner&quot; sugere que deveria usar pesos do British Heart Foundation challenge, mas esses pesos <b>não</b> <b>são</b> <b>carregados</b>. O arquivo <font color="#5769F7">resnet_code15.h5</font> existe no diretório <font color="#5769F7">models/</font>, mas nunca é referenciado no código.
+
+  <b>E4.</b> <b>HuBERT</b> <b>retorna</b> <b>resultado</b> <b>hardcoded</b> <b>—</b> <b>GRAVIDADE:</b> <b>ALTA</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:134-135</font>
+  <font color="#3465A4">def</font><font color="#C4A000"> _predict_hubert(self,</font> <font color="#C4A000">signal_np):</font>
+      ...
+      <font color="#3465A4">return</font> {<font color="#CC0000">&quot;label&quot;</font>: <font color="#CC0000">&quot;Sinusal/Normal&quot;</font>, <font color="#CC0000">&quot;prob&quot;</font>: <font color="#4E9A06">0.85</font>}
+
+  O modelo HuBERT-ECG é carregado da HuggingFace, mas sua saída é <b>ignorada</b>. O comentário diz &quot;em prod haveria uma head linear&quot; — essa head nunca foi implementada. O resultado é que 1/3 dos votos do ensemble é sempre &quot;Sinusal/Normal&quot; com
+  85% de confiança.
+
+  <b>E5.</b> <b>Frequência</b> <b>cardíaca</b> <b>é</b> <b>sempre</b> <b>75</b> <b>bpm</b> <b>—</b> <b>GRAVIDADE:</b> <b>ALTA</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:172</font>
+  <font color="#3465A4">def</font><font color="#C4A000"> _estimate_hr(self,</font> <font color="#C4A000">signal_np):</font>
+      <font color="#3465A4">return</font> <font color="#4E9A06">75</font>  <font color="#4E9A06">#</font> <font color="#4E9A06">Cálculo</font> <font color="#4E9A06">de</font> <font color="#4E9A06">picos</font> <font color="#4E9A06">real</font>
+
+  O comentário ironicamente diz &quot;Cálculo de picos real&quot; mas retorna literalmente a constante <font color="#5769F7">75</font>.
+
+  <b>ERROS</b> <b>ESTRUTURAIS</b> <b>(Problemas</b> <b>de</b> <b>design)</b>
+
+  <b>E6.</b> <b>Pipeline</b> <b>aborta</b> <b>inteiramente</b> <b>quando</b> <b>extração</b> <b>de</b> <b>sinal</b> <b>falha</b> <b>—</b> <b>descarta</b> <b>BHF</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:86-91</font>
+  res_bhf = self._predict_bhf(image_bytes)  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">JÁ</font> <font color="#4E9A06">RODOU</font> <font color="#4E9A06">COM</font> <font color="#4E9A06">SUCESSO</font>
+  signal_np = self._extract_signal(image_bytes)
+  <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">None</font>:
+      <font color="#3465A4">return</font> {<font color="#CC0000">&quot;error&quot;</font>: <font color="#CC0000">&quot;Falha</font> <font color="#CC0000">na</font> <font color="#CC0000">extração...&quot;</font>}  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">res_bhf</font> <font color="#4E9A06">é</font> <font color="#4E9A06">jogado</font> <font color="#4E9A06">fora</font>
+
+  O BHF (mesmo com pesos aleatórios) produziu um resultado, mas é <b>completamente</b> <b>descartado</b> quando a extração de sinal falha. Não existe degradação gradual.
+
+  <b>E7.</b> <b>Erro</b> <b>do</b> <b>pipeline</b> <b>contamina</b> <b>o</b> <b>prompt</b> <b>do</b> <b>LLM</b>
+
+  Quando a pipeline falha, dois textos contraditórios são enviados ao LLM:
+  1. <font color="#5769F7">&quot;[SINAL</font> <font color="#5769F7">DE</font> <font color="#5769F7">ECG]:</font> <font color="#5769F7">Erro</font> <font color="#5769F7">técnico</font> <font color="#5769F7">na</font> <font color="#5769F7">extração:</font> <font color="#5769F7">Falha</font> <font color="#5769F7">na</font> <font color="#5769F7">extração...&quot;</font> — dizendo que falhou
+  2. <font color="#5769F7">&quot;Analise</font> <font color="#5769F7">o</font> <font color="#5769F7">ECG...</font> <font color="#5769F7">forneça</font> <font color="#5769F7">o</font> <font color="#5769F7">laudo</font> <font color="#5769F7">RIGOROSAMENTE</font> <font color="#5769F7">neste</font> <font color="#5769F7">formato:</font> <font color="#5769F7">**HD**:</font> <font color="#5769F7">[...]</font> <font color="#5769F7">**FC**:</font> <font color="#5769F7">[...]&quot;</font> — pedindo para analisar
+
+  O LLM obedece a instrução de formato e preenche o template com o texto do erro, produzindo exatamente o output reportado.
+
+  <b>E8.</b> <b>O</b> <b>endpoint</b> <font color="#5769F7"><b>/chat/multimodal</b></font><b> não</b> <b>roteia</b> <b>para</b> <b>Gemini</b> <b>Cloud</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">main.py:510-534</font>
+  <font color="#4E9A06">#</font> <font color="#4E9A06">NÃO</font> <font color="#4E9A06">há:</font> <font color="#4E9A06">if</font> <font color="#4E9A06">sessao.model_tier</font> <font color="#4E9A06">==</font> <font color="#4E9A06">&quot;hybrid_cloud&quot;</font> <font color="#4E9A06">and</font> <font color="#4E9A06">GEMINI_API_KEY:</font>
+  ollama_payload = {<font color="#CC0000">&quot;model&quot;</font>: sessao.model, ...}
+
+  O endpoint <font color="#5769F7">/chat</font> (texto puro) tem lógica de roteamento para Gemini na linha 276. O <font color="#5769F7">/chat/multimodal</font> <b>não</b> <b>tem</b> — sempre usa Ollama, mesmo quando o tier selecionado é &quot;hybrid_cloud&quot;.
+
+  <b>E9.</b> <b>QueenBee</b> <b>provavelmente</b> <b>não</b> <b>carrega</b> <b>—</b> <b>arquitectura</b> <b>não</b> <b>reconhecida</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:57-61</font>
+  <font color="#3465A4">try</font>:
+      self.queenbee = AutoModel.from_pretrained(<font color="#CC0000">&quot;Trustcat/queenbee-ecg-transformer&quot;</font>,
+                                                 trust_remote_code=<font color="#3465A4">True</font>)
+  <font color="#3465A4">except</font> Exception <font color="#3465A4">as</font> e:
+      logger.error(<font color="#CC0000">f&quot;Erro</font> <font color="#CC0000">no</font> <font color="#CC0000">Queenbee</font> <font color="#CC0000">(Arquitetura</font> <font color="#CC0000">não</font> <font color="#CC0000">reconhecida):</font> <font color="#CC0000">{e}&quot;</font>)
+
+  O comentário no código já antecipa o problema. Se o repositório HuggingFace não tiver um arquivo de configuração de architecture compatível com <font color="#5769F7">AutoModel</font>, o carregamento falha silenciosamente. Resultado: <font color="#5769F7">self.queenbee</font> <font color="#5769F7">=</font> <font color="#5769F7">None</font>, e o
+  ensemble perde mais 1/3 dos votos.
+
+  <b>E10.</b> <b>Consenso</b> <b>por</b> <b>maioria</b> <b>é</b> <b>degenerate</b> <b>com</b> <b>stubs</b>
+
+  Com HuBERT hardcoded como &quot;Sinusal/Normal&quot; e QueenBee provavelmente <font color="#5769F7">None</font>, o ensemble tem:
+  - <b>BHF</b>: resultado aleatório (pesos não fine-tuned)
+  - <b>HuBERT</b>: sempre &quot;Sinusal/Normal&quot;
+  - <b>QueenBee</b>: provavelmente ausente
+
+  Se BHF detectar &quot;AF&quot; e QueenBee estiver ausente, <font color="#5769F7">votes</font> <font color="#5769F7">=</font> <font color="#5769F7">[{&quot;label&quot;:</font> <font color="#5769F7">&quot;AF&quot;},</font> <font color="#5769F7">{&quot;label&quot;:</font> <font color="#5769F7">&quot;Sinusal/Normal&quot;}]</font> — empate 1×1. O <font color="#5769F7">max(set(labels),</font> <font color="#5769F7">key=labels.count)</font> <b>retorna</b> <b>o</b> <b>primeiro</b> <b>por</b> <b>ordem</b> <b>de</b> <b>inserção</b> <b>no</b> <b>set</b>, que é <b>não-determinístico</b> em
+  Python.
+
+  <b>E11.</b> <b>Image</b> <b>processor</b> <b>redimensiona</b> <b>para</b> <b>512×512</b> <b>antes</b> <b>da</b> <b>pipeline</b> <b>de</b> <b>ECG</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">config.py:140</font>
+  MAX_IMAGE_DIMENSION = <font color="#4E9A06">512</font>
+
+  O <font color="#5769F7">image_processor.py</font> reduz a imagem para max 512px de dimensão maior. <b>Porém</b>, a pipeline Ahus-AIM recebe os bytes originais, não a imagem processada — o <font color="#5769F7">perception_manager</font> recebe <font color="#5769F7">f_data[&apos;content&apos;]</font> que são os bytes brutos do upload. A
+  imagem reduzida é usada apenas para o base64 enviado ao LLM via Ollama. <b>Isto</b> <b>não</b> <b>é</b> <b>um</b> <b>bug</b> — é correto — mas vale registrar que as duas paths processam imagens de tamanhos diferentes.
+
+  <b>E12.</b> <font color="#5769F7"><b>src/utils.py</b></font><b> tem</b> <b>dependências</b> <b>de</b> <b>treinamento</b> <b>no</b> <b>runtime</b>
+
+  O arquivo <font color="#5769F7">utils.py</font> importa <font color="#5769F7">ray.tune</font>, <font color="#5769F7">DataLoader</font>, schedulers de learning rate e funções de plot — coisas que só são necessárias para <b>treinamento</b>. Mas como <font color="#5769F7">import_class_from_path()</font> está neste mesmo arquivo, e <font color="#5769F7">InferenceWrapper</font> precisa
+  dele, <b>todo</b> <b>o</b> <b>código</b> <b>de</b> <b>treinamento</b> <b>é</b> <b>importado</b> <b>no</b> <b>runtime</b> <b>de</b> <b>inferência</b>.
+
+  <b>E13.</b> <font color="#5769F7"><b>Dewarper</b></font><b> tem</b> <b>missing</b> <b>return</b> <b>para</b> <b>edge</b> <b>case</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">dewarper.py:456-460</font>
+  <font color="#3465A4">if</font> self.final_local_maxima.shape[<font color="#4E9A06">0</font>] == <font color="#4E9A06">0</font> <font color="#3465A4">or</font> self.optimized_positions.shape[<font color="#4E9A06">0</font>] == <font color="#4E9A06">0</font>:
+      self.grid = output_indices.reshape(height, width, <font color="#4E9A06">2</font>).to(device)
+      <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">SEM</font> <font color="#4E9A06">RETURN!</font> <font color="#4E9A06">Cai</font> <font color="#4E9A06">no</font> <font color="#4E9A06">código</font> <font color="#4E9A06">abaixo</font> <font color="#4E9A06">que</font> <font color="#4E9A06">usa</font> <font color="#4E9A06">tps.transform()</font>
+
+  input_indices = tps.transform(output_indices)...  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">executa</font> <font color="#4E9A06">mesmo</font> <font color="#4E9A06">quando</font> <font color="#4E9A06">deveria</font> <font color="#4E9A06">ter</font> <font color="#4E9A06">retornado</font>
+
+  Se não houver pontos de controle, o grid é setado como identidade, mas a execução continua e chama <font color="#5769F7">tps.transform()</font> que pode falhar.
+
+  <b>E14.</b> <font color="#5769F7"><b>_check_cabrera_limb</b></font><b> está</b> <b>comentado</b> <b>no</b> <font color="#5769F7"><b>LeadIdentifier.__call__</b></font>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">lead_identifier.py:468</font>
+  <font color="#4E9A06">#</font> <font color="#4E9A06">layouts,</font> <font color="#4E9A06">check_flipped</font> <font color="#4E9A06">=</font> <font color="#4E9A06">self._restrict_cabrera_layouts_if_needed(...)</font>
+
+  A heurística de Cabrera limb está desativada. Sem ela, <b>todos</b> <b>os</b> <b>layouts</b> <b>são</b> <b>testados</b> sem pre-filtro, aumentando chance de match errado.
+
+  <b>E15.</b> <font color="#5769F7"><b>print()</b></font><b> em</b> <b>vez</b> <b>de</b> <font color="#5769F7"><b>logger</b></font><b> em</b> <b>vários</b> <b>módulos</b>
+
+  <font color="#5769F7">signal_extractor.py</font>, <font color="#5769F7">lead_identifier.py</font>, <font color="#5769F7">dewarper.py</font>, <font color="#5769F7">inference_wrapper.py</font> usam <font color="#5769F7">print()</font> para warnings, que vão para stdout e se perdem em produção com Uvicorn.
+
+  ---
+  <b>5.</b> <b>SOLUÇÕES</b> <b>RECOMENDADAS</b> <b>—</b> <b>EM</b> <b>ORDEM</b> <b>DE</b> <b>PRIORIDADE</b>
+
+  <b>S1.</b> <b>Corrigir</b> <b>requirements.txt</b> <b>(resolve</b> <b>E1</b> <b>—</b> <b>BLOQUEANTE)</b>
+
+  Adicionar todas as dependências faltantes. Ou, melhor: <b>isolar</b> <font color="#5769F7"><b>import_class_from_path()</b></font><b> do</b> <font color="#5769F7"><b>src/utils.py</b></font> para evitar que <font color="#5769F7">ray</font> seja importado no runtime:
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">Criar:</font> <font color="#4E9A06">ahus_aim/src/import_helper.py</font>
+  <font color="#3465A4">import</font> importlib
+  <font color="#3465A4">def</font><font color="#C4A000"> import_class_from_path(path):</font>
+      module = importlib.import_module(<font color="#CC0000">&quot;.&quot;</font>.join(path.split(<font color="#CC0000">&quot;.&quot;</font>)[:-<font color="#4E9A06">1</font>]))
+      <font color="#3465A4">return</font> <font color="#06989A">getattr</font>(module, path.split(<font color="#CC0000">&quot;.&quot;</font>)[-<font color="#4E9A06">1</font>])
+
+  E alterar <font color="#5769F7">inference_wrapper.py</font> para <font color="#5769F7">from</font> <font color="#5769F7">src.import_helper</font> <font color="#5769F7">import</font> <font color="#5769F7">import_class_from_path</font>.
+
+  <b>S2.</b> <b>Implementar</b> <b>degradação</b> <b>gradual</b> <b>no</b> <font color="#5769F7"><b>analyze()</b></font><b> (resolve</b> <b>E6)</b>
+
+  <font color="#3465A4">def</font><font color="#C4A000"> analyze(self,</font> <font color="#C4A000">image_bytes):</font>
+      res_bhf = self._predict_bhf(image_bytes) <font color="#3465A4">if</font> self.bhf_model <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+
+      signal_np = self._extract_signal(image_bytes)
+
+      <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">not</font> <font color="#3465A4">None</font>:
+          res_hubert = self._predict_hubert(signal_np) <font color="#3465A4">if</font> self.huBERT <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+          res_queenbee = self._predict_queenbee(signal_np) <font color="#3465A4">if</font> self.queenbee <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+      <font color="#3465A4">else</font>:
+          res_hubert = <font color="#3465A4">None</font>
+          res_queenbee = <font color="#3465A4">None</font>
+
+      votes = [r <font color="#3465A4">for</font> r <font color="#3465A4">in</font> [res_bhf, res_hubert, res_queenbee]
+               <font color="#3465A4">if</font> r <font color="#3465A4">is</font> <font color="#3465A4">not</font> <font color="#3465A4">None</font> <font color="#3465A4">and</font> r[<font color="#CC0000">&quot;label&quot;</font>] != <font color="#CC0000">&quot;Error&quot;</font>]
+
+      <font color="#3465A4">if</font> <font color="#3465A4">not</font> votes:
+          <font color="#3465A4">return</font> {<font color="#CC0000">&quot;error&quot;</font>: <font color="#CC0000">&quot;Nenhum</font> <font color="#CC0000">modelo</font> <font color="#CC0000">produziu</font> <font color="#CC0000">resultado.&quot;</font>}
+
+      <font color="#3465A4">return</font> {
+          <font color="#CC0000">&quot;status&quot;</font>: <font color="#CC0000">&quot;partial&quot;</font> <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">None</font> <font color="#3465A4">else</font> <font color="#CC0000">&quot;success&quot;</font>,
+          <font color="#CC0000">&quot;rhythm&quot;</font>: self._consensus_vote(votes),
+          <font color="#CC0000">&quot;hr&quot;</font>: self._estimate_hr(signal_np) <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">not</font> <font color="#3465A4">None</font> <font color="#3465A4">else</font> <font color="#CC0000">&quot;Indisponível&quot;</font>,
+          <font color="#CC0000">&quot;findings&quot;</font>: [...],
+          <font color="#CC0000">&quot;method&quot;</font>: <font color="#CC0000">&quot;Partial</font> <font color="#CC0000">(BHF</font> <font color="#CC0000">only)&quot;</font> <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">None</font> <font color="#3465A4">else</font> <font color="#CC0000">&quot;Triple</font> <font color="#CC0000">Ensemble&quot;</font>,
+          <font color="#CC0000">&quot;warning&quot;</font>: <font color="#CC0000">&quot;Extração</font> <font color="#CC0000">de</font> <font color="#CC0000">sinal</font> <font color="#CC0000">falhou.</font> <font color="#CC0000">Resultado</font> <font color="#CC0000">baseado</font> <font color="#CC0000">apenas</font> <font color="#CC0000">em</font> <font color="#CC0000">análise</font> <font color="#CC0000">visual.&quot;</font>
+                     <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">None</font> <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+      }
+
+  <b>S3.</b> <b>Separar</b> <b>erro</b> <b>do</b> <b>template</b> <b>de</b> <b>formato</b> <b>(resolve</b> <b>E7)</b>
+
+  Quando a pipeline retorna erro, <font color="#5769F7">get_summary_for_prompt()</font> deve instruir o LLM a <b>não</b> <b>usar</b> <b>o</b> <b>template</b> <b>estruturado</b>:
+
+  <font color="#3465A4">def</font><font color="#C4A000"> get_summary_for_prompt(self,</font> <font color="#C4A000">analysis_results):</font>
+      <font color="#3465A4">if</font> <font color="#CC0000">&quot;error&quot;</font> <font color="#3465A4">in</font> analysis_results:
+          <font color="#3465A4">return</font> (
+              <font color="#CC0000">&quot;\n[AVISO]:</font> <font color="#CC0000">A</font> <font color="#CC0000">extração</font> <font color="#CC0000">automatizada</font> <font color="#CC0000">de</font> <font color="#CC0000">sinais</font> <font color="#CC0000">do</font> <font color="#CC0000">ECG</font> <font color="#CC0000">falhou.</font> <font color="#CC0000">&quot;</font>
+              <font color="#CC0000">&quot;Analise</font> <font color="#CC0000">a</font> <font color="#CC0000">IMAGEM</font> <font color="#CC0000">DIRETAMENTE</font> <font color="#CC0000">usando</font> <font color="#CC0000">sua</font> <font color="#CC0000">capacidade</font> <font color="#CC0000">visual.</font> <font color="#CC0000">&quot;</font>
+              <font color="#CC0000">&quot;NÃO</font> <font color="#CC0000">use</font> <font color="#CC0000">o</font> <font color="#CC0000">formato</font> <font color="#CC0000">estruturado</font> <font color="#CC0000">HD/FC/Ritmo.</font> <font color="#CC0000">&quot;</font>
+              <font color="#CC0000">&quot;Descreva</font> <font color="#CC0000">os</font> <font color="#CC0000">achados</font> <font color="#CC0000">visuais</font> <font color="#CC0000">que</font> <font color="#CC0000">conseguir</font> <font color="#CC0000">identificar</font> <font color="#CC0000">na</font> <font color="#CC0000">imagem.\n&quot;</font>
+          )
+
+  <b>S4.</b> <b>Usar</b> <font color="#5769F7"><b>lead_layouts_all.yml</b></font><b> em</b> <b>vez</b> <b>de</b> <font color="#5769F7"><b>_reduced.yml</b></font><b> (resolve</b> <b>E2)</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">ecg_analyzer.py:79</font>
+  cfg.LAYOUT_IDENTIFIER.config_path = <font color="#06989A">str</font>(AHUS_AIM_DIR / <font color="#CC0000">&apos;src/config/lead_layouts_all.yml&apos;</font>)
+
+  <b>S5.</b> <b>Carregar</b> <b>pesos</b> <b>reais</b> <b>do</b> <b>BHF</b> <b>ou</b> <b>usar</b> <font color="#5769F7"><b>resnet_code15.h5</b></font><b> (resolve</b> <b>E3)</b>
+
+  O arquivo <font color="#5769F7">resnet_code15.h5</font> já existe no diretório <font color="#5769F7">models/</font>. Implementar o carregamento:
+  <font color="#4E9A06">#</font> <font color="#4E9A06">Usar</font> <font color="#4E9A06">um</font> <font color="#4E9A06">modelo</font> <font color="#4E9A06">com</font> <font color="#4E9A06">pesos</font> <font color="#4E9A06">cardiológicos</font> <font color="#4E9A06">reais</font> <font color="#4E9A06">em</font> <font color="#4E9A06">vez</font> <font color="#4E9A06">de</font> <font color="#4E9A06">pretrained=True</font> <font color="#4E9A06">genérico</font>
+  checkpoint = torch.load(<font color="#CC0000">&quot;backend/models/resnet_code15.h5&quot;</font>, ...)
+  self.bhf_model.load_state_dict(checkpoint)
+
+  Ou, se os pesos de ECG não estiverem no formato do ConvNeXt, usar um Code-15 ResNet com os pesos <font color="#5769F7">.h5</font> corretos.
+
+  <b>S6.</b> <b>Implementar</b> <b>HuBERT</b> <b>inference</b> <b>real</b> <b>ou</b> <b>remover</b> <b>do</b> <b>ensemble</b> <b>(resolve</b> <b>E4)</b>
+
+  Adicionar uma classification head ao HuBERT:
+  <font color="#3465A4">class</font> <font color="#3465A4">HuBERTClassifier(nn.Module):</font>
+      <font color="#3465A4">def</font><font color="#C4A000"> __init__(self,</font> <font color="#C4A000">base_model,</font> <font color="#C4A000">num_classes=</font><font color="#4E9A06">6</font><font color="#C4A000">):</font>
+          <font color="#06989A">super</font>().__init__()
+          self.base = base_model
+          self.classifier = nn.Linear(base_model.config.hidden_size, num_classes)
+
+      <font color="#3465A4">def</font><font color="#C4A000"> forward(self,</font> <font color="#C4A000">x):</font>
+          features = self.base(x).last_hidden_state.mean(dim=<font color="#4E9A06">1</font>)
+          <font color="#3465A4">return</font> self.classifier(features)
+
+  Ou, até que seja implementado, remover HuBERT do ensemble para não contaminar o consenso com votos falsos.
+
+  <b>S7.</b> <b>Implementar</b> <b>cálculo</b> <b>real</b> <b>de</b> <b>frequência</b> <b>cardíaca</b> <b>(resolve</b> <b>E5)</b>
+
+  <font color="#3465A4">def</font><font color="#C4A000"> _estimate_hr(self,</font> <font color="#C4A000">signal_np):</font>
+      <font color="#3465A4">if</font> signal_np <font color="#3465A4">is</font> <font color="#3465A4">None</font>:
+          <font color="#3465A4">return</font> <font color="#3465A4">None</font>
+      <font color="#4E9A06">#</font> <font color="#4E9A06">Usar</font> <font color="#4E9A06">lead</font> <font color="#4E9A06">II</font> <font color="#4E9A06">(índice</font> <font color="#4E9A06">1)</font> <font color="#4E9A06">para</font> <font color="#4E9A06">detecção</font> <font color="#4E9A06">de</font> <font color="#4E9A06">picos</font> <font color="#4E9A06">R</font>
+      lead_ii = signal_np[<font color="#4E9A06">1</font>] <font color="#3465A4">if</font> signal_np.shape[<font color="#4E9A06">0</font>] &gt; <font color="#4E9A06">1</font> <font color="#3465A4">else</font> signal_np[<font color="#4E9A06">0</font>]
+      lead_ii = lead_ii[~np.isnan(lead_ii)]
+      <font color="#3465A4">if</font> <font color="#06989A">len</font>(lead_ii) &lt; <font color="#4E9A06">100</font>:
+          <font color="#3465A4">return</font> <font color="#3465A4">None</font>
+      <font color="#3465A4">from</font> scipy.signal <font color="#3465A4">import</font> find_peaks
+      peaks, _ = find_peaks(lead_ii, distance=<font color="#06989A">len</font>(lead_ii)//<font color="#4E9A06">20</font>, prominence=np.std(lead_ii)*<font color="#4E9A06">0.5</font>)
+      <font color="#3465A4">if</font> <font color="#06989A">len</font>(peaks) &lt; <font color="#4E9A06">2</font>:
+          <font color="#3465A4">return</font> <font color="#3465A4">None</font>
+      rr_intervals = np.diff(peaks)
+      <font color="#4E9A06">#</font> <font color="#4E9A06">5000</font> <font color="#4E9A06">amostras</font> <font color="#4E9A06">=</font> <font color="#4E9A06">10</font> <font color="#4E9A06">segundos</font> <font color="#4E9A06">(padrão</font> <font color="#4E9A06">ECG)</font> <font color="#4E9A06">→</font> <font color="#4E9A06">sample_rate</font> <font color="#4E9A06">=</font> <font color="#4E9A06">500</font> <font color="#4E9A06">Hz</font>
+      sample_rate = <font color="#4E9A06">500</font>
+      mean_rr = np.mean(rr_intervals) / sample_rate
+      <font color="#3465A4">return</font> <font color="#06989A">int</font>(<font color="#4E9A06">60</font> / mean_rr) <font color="#3465A4">if</font> mean_rr &gt; <font color="#4E9A06">0</font> <font color="#3465A4">else</font> <font color="#3465A4">None</font>
+
+  <b>S8.</b> <b>Espelhar</b> <b>lógica</b> <b>Gemini</b> <b>no</b> <b>endpoint</b> <b>multimodal</b> <b>(resolve</b> <b>E8)</b>
+
+  Copiar o bloco <font color="#5769F7">if</font> <font color="#5769F7">sessao.model_tier</font> <font color="#5769F7">==</font> <font color="#5769F7">&quot;hybrid_cloud&quot;</font> do <font color="#5769F7">/chat</font> para <font color="#5769F7">/chat/multimodal</font>. Gemini 2.5 Flash suporta imagens nativamente, então pode receber o base64 diretamente.
+
+  <b>S9.</b> <b>Adicionar</b> <b>logging</b> <b>detalhado</b> <b>na</b> <b>inicialização</b> <b>(melhoria</b> <b>diagnóstica)</b>
+
+  <font color="#3465A4">def</font><font color="#C4A000"> _init_digitizer(self):</font>
+      <font color="#3465A4">try</font>:
+          ...
+          self.digitizer = InferenceWrapper(config=cfg, device=self.device, apply_dewarping=<font color="#3465A4">True</font>)
+          logger.info(<font color="#CC0000">&quot;✓</font> <font color="#CC0000">Digitizer</font> <font color="#CC0000">Ahus-AIM</font> <font color="#CC0000">inicializado</font> <font color="#CC0000">com</font> <font color="#CC0000">sucesso&quot;</font>)
+      <font color="#3465A4">except</font> Exception <font color="#3465A4">as</font> e:
+          logger.exception(<font color="#CC0000">f&quot;✗</font> <font color="#CC0000">Falha</font> <font color="#CC0000">ao</font> <font color="#CC0000">inicializar</font> <font color="#CC0000">Digitizer:</font> <font color="#CC0000">{e}&quot;</font>)
+          <font color="#4E9A06">#</font> <font color="#4E9A06">logger.exception</font> <font color="#4E9A06">inclui</font> <font color="#4E9A06">o</font> <font color="#4E9A06">traceback</font> <font color="#4E9A06">completo</font>
+
+  <b>S10.</b> <b>Corrigir</b> <b>missing</b> <b>return</b> <b>no</b> <b>Dewarper</b> <b>(resolve</b> <b>E13)</b>
+
+  <font color="#4E9A06">#</font> <font color="#4E9A06">dewarper.py:456-460</font>
+  <font color="#3465A4">if</font> self.final_local_maxima.shape[<font color="#4E9A06">0</font>] == <font color="#4E9A06">0</font> <font color="#3465A4">or</font> self.optimized_positions.shape[<font color="#4E9A06">0</font>] == <font color="#4E9A06">0</font>:
+      self.grid = output_indices.reshape(height, width, <font color="#4E9A06">2</font>).to(device)
+      <font color="#3465A4">return</font>  <font color="#4E9A06">#</font> <font color="#4E9A06">←</font> <font color="#4E9A06">ADICIONAR</font> <font color="#4E9A06">RETURN</font>
+
+  ---
+  <b>6.</b> <b>DIAGNÓSTICO</b> <b>RÁPIDO</b> <b>PARA</b> <b>CONFIRMAR</b> <b>A</b> <b>CAUSA</b>
+
+  Para confirmar qual cenário está em jogo, basta verificar os logs de startup do servidor. A sequência esperada de mensagens seria:
+
+  # Se InferenceWrapper não importou (Cenário A, Razão 1):
+  # → NÃO haverá a mensagem &quot;Erro ao configurar Digitizer&quot;
+  # → NÃO haverá &quot;Tentando carregar Queenbee-ECG Transformer&quot;
+  # → Porque o __init__ do ECGAnalyzer falharia antes (ou silenciosamente)
+
+  # Se _init_digitizer() falhou (Cenário A, Razão 2):
+  &quot;Erro ao configurar Digitizer: &lt;mensagem específica&gt;&quot;
+
+  # Se tudo carregou mas sinal não foi extraído (Cenário B):
+  &quot;Erro na pipeline ECG: &lt;exceção específica&gt;&quot;
+
+
+  O diagnóstico mais provável, pela análise do código, é <b>E1</b> <b>(dependências</b> <b>ausentes)</b> — especificamente <font color="#5769F7">ray</font> importado em <font color="#5769F7">src/utils.py</font> na linha 10, que impede o carregamento do <font color="#5769F7">InferenceWrapper</font> e consequentemente de toda a pipeline Ahus-AIM.
+
+<font color="#666666">✻</font> <font color="#666666">Cooked</font> <font color="#666666">for</font> <font color="#666666">4m</font> <font color="#666666">28s</font>
+
+<font color="#2C7A39">●</font> Agent &quot;Deep ECG pipeline analysis&quot; completed
+                             
+<font color="#000000">●</font> O agente de background concluiu. A análise completa já está no relatório acima. O agente confirmou a lista exata de todos os arquivos Python do projeto e validou o conteúdo que li diretamente.                                            
+                                                                            
+  A análise completa com Opus 4.6 já foi entregue nas mensagens acima. Eis um resumo executivo dos achados:                                                                                                                                   
+                                                                                                                                                                                                                                              
+  ---                                                                                                                                                                                                                                         
+  <b>RESUMO</b> <b>EXECUTIVO</b>                                                                                                                                                                                                                            
+                                                                                                                                                                                                                                              
+  <b>O</b> <b>Produto</b>
+
+  <b>SLM</b> <b>MedTeacher</b> — assistente clínico de IA que roda localmente (MedGemma via Ollama) ou na nuvem (Gemini 2.5 Flash), com análise multimodal de ECG, RX e laudos laboratoriais.
+
+  <b>O</b> <b>Erro</b> <b>Reportado</b>
+
+  <font color="#5769F7">HD:</font> <font color="#5769F7">[Falha</font> <font color="#5769F7">na</font> <font color="#5769F7">extração</font> <font color="#5769F7">de</font> <font color="#5769F7">sinais.</font> <font color="#5769F7">Pipeline</font> <font color="#5769F7">incompleta.]</font> — é a resposta do LLM que recebeu uma mensagem de erro da pipeline de ECG e a copiou para o campo HD do template estruturado.
+
+  <b>Causa</b> <b>Raiz</b> <b>Mais</b> <b>Provável</b>
+
+  <font color="#5769F7"><b>src/utils.py</b></font><b> importa</b> <font color="#5769F7"><b>ray.tune.Stopper</b></font><b> na</b> <b>linha</b> <b>10</b> — pacote <font color="#5769F7">ray</font> não está no <font color="#5769F7">requirements.txt</font>. Isso causa <font color="#5769F7">ImportError</font> em cadeia que impede o carregamento do <font color="#5769F7">InferenceWrapper</font>, deixando <font color="#5769F7">self.digitizer</font> <font color="#5769F7">=</font> <font color="#5769F7">None</font>, o que faz <font color="#5769F7">_extract_signal()</font>
+  retornar <font color="#5769F7">None</font> imediatamente.
+
+  <b>Os</b> <b>15</b> <b>Problemas</b> <b>Identificados</b>
+
+  ┌─────┬────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │  #  │ Gravidade  │                                            Problema                                             │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E1  │ <b>BLOQUEANTE</b> │ 10+ dependências ausentes no requirements.txt (ray, networkx, sklearn, torch-tps, timm, etc.)   │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E2  │ Alta       │ Layout YAML só tem 2 formatos 6×1 — falta o padrão 3×4+rhythm strip                             │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E3  │ Alta       │ BHF usa pesos ImageNet aleatórios, não pesos cardiológicos                                      │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E4  │ Alta       │ HuBERT sempre retorna &quot;Sinusal/Normal&quot; hardcoded                                                │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E5  │ Alta       │ FC sempre retorna 75 bpm hardcoded                                                              │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E6  │ Estrutural │ Pipeline descarta resultado do BHF quando extração de sinal falha                               │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E7  │ Estrutural │ Erro da pipeline contamina o prompt, forçando o LLM a preencher template com dados inexistentes │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E8  │ Estrutural │ <font color="#5769F7">/chat/multimodal</font> não roteia para Gemini Cloud                                                   │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E9  │ Estrutural │ QueenBee provavelmente não carrega (arquitetura não reconhecida)                                │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E10 │ Estrutural │ Consenso degenerate: 1 voto aleatório + 1 hardcoded + 1 ausente                                 │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E11 │ Baixa      │ Image processor reduz para 512px (não afeta pipeline diretamente)                               │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E12 │ Design     │ <font color="#5769F7">src/utils.py</font> mistura código de treinamento com runtime                                          │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E13 │ Bug        │ <font color="#5769F7">Dewarper._fit_warp()</font> falta <font color="#5769F7">return</font> em edge case                                                  │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E14 │ Design     │ Heurística Cabrera está comentada no LeadIdentifier                                             │
+  ├─────┼────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ E15 │ QoL        │ <font color="#5769F7">print()</font> em vez de <font color="#5769F7">logger</font> em módulos do Ahus-AIM                                                 │
+  └─────┴────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  <b>Top</b> <b>3</b> <b>Correções</b> <b>Imediatas</b>
+
+  1. <b>Isolar</b> <font color="#5769F7"><b>import_class_from_path()</b></font> do <font color="#5769F7">src/utils.py</font> para remover dependência de <font color="#5769F7">ray</font> no runtime
+  2. <b>Implementar</b> <b>degradação</b> <b>gradual</b> — usar resultado do BHF quando sinal falha
+  3. <b>Separar</b> <b>erro</b> <b>do</b> <b>template</b> — quando pipeline falha, instruir o LLM a analisar a imagem visualmente em vez de forçar o formato HD/FC/Ritmo
+</pre>

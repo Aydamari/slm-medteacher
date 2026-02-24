@@ -1,0 +1,74 @@
+BHF Winner (Nicholas0917), HuBERT (Edoardo-BS) e Queenbee (PTB-XL).
+
+***************
+
+Relatório Técnico de Arquitetura: SLM MedTeacher
+  Objetivo: Assistente Profissional de Raciocínio Clínico "Privacy-First" (Google HAI-DEF Challenge).
+
+
+  1. Filosofia de Design: "Cérebro e Olhos"
+  O produto abandonou a ideia de usar um único modelo multimodal (LLM) para tudo. A nova arquitetura é Híbrida:
+   * Os Olhos (Perception Tools): Modelos SOTA (State-of-the-Art) especializados em tarefas de visão e sinais (CNNs, Transformers 1D). Eles extraem "Verdades Clínicas" brutas.
+   * O Cérebro (Orquestrador): MedGemma 1.5 4B (Local) ou Gemini 2.5 (Cloud). Ele recebe os dados estruturados dos "olhos" e realiza o raciocínio clínico, diagnóstico diferencial e conduta.
+
+  ---
+
+
+  2. Pipelines de Percepção (Implementações Reais)
+
+
+  A. Pipeline de ECG (Triple Ensemble SOTA 2025)
+  Esta é a joia da coroa do produto, desenhada para máxima acurácia.
+   1. Extração (The Digitizer): Usa a biblioteca Ahus-AIM (Akershus University Hospital). Realiza segmentação por U-Net e correção de perspectiva para isolar as 12 derivações de fotos de celular.
+   2. Classificação Tripla (Votação 2/3):
+       * Modelo 1 (Visão): ConvNeXt-Base (Vencedor do BHF Challenge 2024 - Nicholas0917). Analisa a imagem diretamente.
+       * Modelo 2 (Sinal): HuBERT-ECG (Edoardo-BS). Um Foundation Model que entende a "gramática" do sinal elétrico.
+       * Modelo 3 (Sinal): ECG-BERT. Especializado em detecção de arritmias via Transformers.
+   3. Consenso: O backend calcula o mismatch. Se 2 de 3 modelos concordarem, o diagnóstico é injetado no prompt como "Consenso Médico IA".
+
+
+  B. Pipeline de Raio-X de Tórax
+   * Motor: TorchXRayVision (DenseNet121).
+   * Capacidade: Classificação multi-label de 18 patologias (Pneumonia, Cardiomegalia, Derrame Pleural, etc.).
+   * Decisão: Escolhido por ser treinado em datasets clínicos massivos (CheXpert, NIH, MIMIC-CXR), superando modelos de visão genéricos.
+
+
+  C. Pipeline de Documentos e Laudos (Lab Reports)
+   * OCR: PaddleOCR v4 (Motor ultrarrápido para mobile/edge).
+   * Estruturação: Lógica inspirada no LLM-AIx (Nature 2025). Realiza o cleansing de ruídos do OCR e identifica pares "Exame: Valor: Unidade" via Regex e Heurística antes de enviar ao LLM.
+
+  ---
+
+
+  3. Camada de Segurança e Privacidade
+   * Motor: Microsoft Presidio + Spacy (pt_core_news_lg).
+   * Funcionamento: Todo texto extraído ou digitado passa por um filtro de PII (Personally Identifiable Information). Nomes de pacientes, CPFs e hospitais são substituídos por tokens como [PACIENTE] ou [ID] antes de qualquer processamento
+     por LLMs (mesmo locais).
+
+  ---
+
+
+  4. Otimização de Performance
+   * Quantização: Mudança de 8-bit (Q8_0) para **4-bit (Q4_K_M)** no MedGemma 4B. Reduziu o uso de RAM em 50% e dobrou a velocidade de resposta.
+   * Contexto Dinâmico: NUM_CTX limitado a 4096 para estabilidade multimodal.
+   * Timeout: Ajustado para 1200s como rede de segurança para o primeiro carregamento de modelos pesados em CPUs.
+
+  ---
+
+
+  5. Manifesto de Dependências (Para Recuperação)
+  Para recriar este ambiente do zero:
+   * Core: fastapi, uvicorn, httpx, python-dotenv.
+   * IA Vision/Sinal: torch, torchvision, timm, transformers, einops, onnxruntime, torchxrayvision.
+   * Extração/OCR: paddlepaddle, paddleocr, yacs, scikit-image, scipy.
+   * Segurança: presidio-analyzer, presidio-anonymizer, spacy (model pt_core_news_lg).
+
+  ---
+
+
+  6. Desafios Futuros e Roadmap
+   1. XAI (Explainability): Implementar Grad-CAM no Raio-X para exibir mapas de calor na interface (onde a IA está olhando).
+   2. ECG de Papel Amassado: Refinar o Dewarper do Ahus-AIM para fotos com deformações severas.
+   3. Memória de Longo Prazo: Implementar uma base vetorial (RAG) local para que o MedTeacher "aprenda" com os casos passados do médico (sempre anonimizado).
+   4. Instalador One-Click: Empacotar todas as dependências (especialmente os modelos de ~10GB totais) em um instalador simplificado para médicos não-técnicos.
+

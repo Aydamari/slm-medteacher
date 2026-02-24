@@ -1,0 +1,43 @@
+# Servidor Web
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Cliente HTTP assíncrono (chamar Ollama)
+httpx==0.27.2
+
+# Processamento de PDFs
+PyPDF2==3.0.1
+
+# Processamento de Imagens e CNNs
+Pillow==10.4.0
+opencv-python-headless==4.10.0.84
+onnxruntime==1.24.1
+paddlepaddle>=3.3.0
+paddleocr>=3.4.0
+paddle2onnx>=2.1.0
+
+# Deep Learning Avançado (ECG & X-Ray)
+torch>=2.1.0
+torchvision
+transformers>=4.40.0
+einops
+scikit-image
+albumentations
+scipy
+yacs
+timm
+networkx
+scikit-learn
+matplotlib
+torchxrayvision
+neurokit2
+
+# PII Anonymization
+presidio-analyzer
+presidio-anonymizer
+spacy
+
+# Utilitários
+python-multipart==0.0.17  # Upload de arquivos
+aiofiles==24.1.0          # Operações assíncronas de arquivo
+python-dotenv==1.2.1      # Variáveis de ambiente seguras

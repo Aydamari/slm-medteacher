@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Sessions & Data
+sessions/
+!sessions/exports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*~
+*.swp
+
+# Security — NEVER commit vault or key files
+~/.medteacher/
+vault.enc
+vault.key
+vault.bin
+*.vault
+
+# Large model weight files — use Git LFS or provide download instructions
+# (uncomment the lines below if NOT using Git LFS)
+# *.h5
+# *.pt
+# *.pth
+# *.safetensors
+# *.onnx
+# *.ckpt
+
+# HuggingFace and nnUNet local caches (can be re-downloaded)
+backend/models/weights/.cache/
+backend/models/.cache/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Temporary and log files
+*.log
+*.tmp
+
+# Large model weights — exceed GitHub 100 MB limit
+# Download instructions: see UPLOAD_GUIDE.md
+*.pth
+*.h5
+*.safetensors
+backend/models/ecg_segmentation_unet.pt
+backend/utils/perception/ecg_image_kit/roi/yolov7/yolov7_custom.pt
+backend/models/weights/queenbee/ecg_transformer_best.pt

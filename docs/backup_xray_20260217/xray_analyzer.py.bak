@@ -1,0 +1,193 @@
+import logging
+import torch
+import torchxrayvision as xrv
+import numpy as np
+import cv2
+from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
+
+class XRayAnalyzer:
+    """
+    Analisa radiografias de tórax usando um ENSEMBLE (Conjunto) de modelos.
+    Combina DenseNet121 e ResNet50 para maior acurácia e robustez.
+    """
+    def __init__(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model_dense = None
+        self.model_res = None
+        
+        try:
+            logger.info("Inicializando Pipeline de Raio-X (Ensemble)...")
+            
+            # Modelo 1: DenseNet121 (Resolução 224)
+            logger.info("Carregando Model A: DenseNet121...")
+            self.model_dense = xrv.models.DenseNet(weights="densenet121-res224-all")
+            self.model_dense.to(self.device).eval()
+            
+            # Modelo 2: ResNet50 (Resolução 512 - Único peso disponível)
+            logger.info("Carregando Model B: ResNet50...")
+            self.model_res = xrv.models.ResNet(weights="resnet50-res512-all")
+            self.model_res.to(self.device).eval()
+            
+            logger.info("Ensemble RX carregado com sucesso (DenseNet + ResNet).")
+            
+        except Exception as e:
+            logger.error(f"Erro crítico ao carregar modelos de Raio-X: {e}")
+
+    def analyze(self, image_bytes: bytes) -> Dict[str, Any]:
+        if self.model_dense is None or self.model_res is None:
+            return {"error": "Pipeline de Raio-X incompleto (modelos não carregados)."}
+
+        try:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            img_original = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+            if img_original is None: return {"error": "Falha ao decodificar imagem."}
+
+            # Normalização (Comum)
+            img_norm = xrv.datasets.normalize(img_original, 255) 
+
+            # Preparação para DenseNet (224x224)
+            img_224 = cv2.resize(img_norm, (224, 224))
+            img_224 = img_224[None, :, :]
+            input_dense = torch.from_numpy(img_224).unsqueeze(0).to(self.device)
+
+            # Preparação para ResNet (512x512)
+            img_512 = cv2.resize(img_norm, (512, 512))
+            img_512 = img_512[None, :, :]
+            input_res = torch.from_numpy(img_512).unsqueeze(0).to(self.device)
+            
+            with torch.no_grad():
+                # Inferência Modelo A (DenseNet)
+                out_dense = self.model_dense(input_dense)
+                
+                # Inferência Modelo B (ResNet)
+                out_res = self.model_res(input_res)
+                
+                # FUSÃO (Ensemble Averaging)
+                # Os modelos compartilham a mesma lista de patologias
+                outputs_avg = (out_dense + out_res) / 2
+                
+                results = dict(zip(self.model_dense.pathologies, outputs_avg[0].cpu().numpy()))
+            
+            # Estratégia Top-K: Selecionar as 5 patologias com maior probabilidade média
+            sorted_results = sorted(results.items(), key=lambda item: item[1], reverse=True)
+            top_k = sorted_results[:5]
+            
+            findings = [f"{p} ({prob:.0%})" for p, prob in top_k]
+            
+            return {
+                "status": "success",
+                "findings": findings,
+                "method": "Ensemble (DenseNet121 + ResNet50)"
+            }
+        except Exception as e:
+            logger.error(f"Erro na análise de Raio-X: {e}")
+            return {"error": str(e)}
+
+    def get_summary_for_prompt(self, analysis_results: Dict[str, Any], language: str = "en") -> str:
+        if "error" in analysis_results:
+            # Fallback robusto: Instrui análise visual manual sem vazar erro técnico
+            msg_pt = (
+                f"\n=== AVISO TÉCNICO ===\n"
+                f"A análise automática de suporte (IA) está indisponível momentaneamente ({analysis_results['error']}).\n"
+                f"Prossiga com sua ANÁLISE VISUAL direta da imagem.\n"
+                f"=====================\n\n"
+                f"[[[ FORMATO DE RESPOSTA OBRIGATÓRIO ]]]\n"
+                f"Você deve gerar o laudo baseado APENAS na sua visão:\n\n"
+                f"1. **RESUMO DOS ACHADOS (VISUAL)**\n"
+                f"   - (Descreva detalhadamente o que você vê na imagem)\n\n"
+                f"2. **CLASSIFICAÇÃO DE RISCO**\n"
+                f"   - (Preencha conforme sua avaliação visual)\n"
+                f"   - [ ] IMPRESCINDÍVEIS (Risco Imediato)\n"
+                f"   - [ ] SEVEROS\n"
+                f"   - [ ] INVESTIGAÇÃO NECESSÁRIA\n"
+                f"   - [ ] ACHADOS MENORES\n\n"
+                f"3. **RACIOCÍNIO E CONDUTA**\n"
+                f"   - (Diagnósticos diferenciais e sugestão de conduta)\n"
+                f"-------------------------------------------------------------------\n"
+            )
+            msg_en = (
+                f"\n=== TECHNICAL NOTICE ===\n"
+                f"Automated AI support analysis is temporarily unavailable ({analysis_results['error']}).\n"
+                f"Proceed with your direct VISUAL ANALYSIS of the image.\n"
+                f"========================\n\n"
+                f"[[[ MANDATORY RESPONSE FORMAT ]]]\n"
+                f"You must generate the report based ONLY on your vision:\n\n"
+                f"1. **FINDINGS SUMMARY (VISUAL)**\n"
+                f"   - (Describe in detail what you see in the image)\n\n"
+                f"2. **RISK CLASSIFICATION**\n"
+                f"   - (Fill according to your visual assessment)\n"
+                f"   - [ ] CRITICAL (Immediate Risk)\n"
+                f"   - [ ] SEVERE\n"
+                f"   - [ ] REQUIRES INVESTIGATION\n"
+                f"   - [ ] MINOR FINDINGS\n\n"
+                f"3. **REASONING AND MANAGEMENT**\n"
+                f"   - (Differentials and suggested management)\n"
+                f"--------------------------------------------------\n"
+            )
+            return msg_pt if language == "pt" else msg_en
+        
+        findings_list = analysis_results.get('findings', [])
+        findings_str = ', '.join(findings_list) if findings_list else "Nenhum achado significativo detectado"
+
+        if language == "pt":
+            return (
+                f"\n=== DADOS DE SUPORTE (IA Ensemble - Top 5 Probabilidades) ===\n"
+                f"{findings_str}\n"
+                f"=============================================================\n\n"
+                f"[[[ FORMATO DE RESPOSTA OBRIGATÓRIO ]]]\n"
+                f"Você deve gerar o laudo preenchendo os campos abaixo:\n\n"
+                f"1. **RESUMO DOS ACHADOS**\n"
+                f"   - (Descreva as alterações visuais e cite as probabilidades da IA)\n\n"
+                f"2. **CLASSIFICAÇÃO DE RISCO**\n"
+                f"   - (Liste apenas os níveis com achados positivos. Omita os vazios)\n"
+                f"   - [ ] IMPRESCINDÍVEIS (Risco Imediato)\n"
+                f"   - [ ] SEVEROS\n"
+                f"   - [ ] INVESTIGAÇÃO NECESSÁRIA\n"
+                f"   - [ ] ACHADOS MENORES\n\n"
+                f"3. **RACIOCÍNIO E CONDUTA**\n"
+                f"   - (Diagnósticos diferenciais e sugestão de conduta)\n"
+                f"-------------------------------------------------------------------\n"
+            )
+        else:
+            return (
+                f"\n=== SUPPORTING DATA (AI Ensemble - Top 5 Probabilities) ===\n"
+                f"{findings_str}\n"
+                f"===========================================================\n\n"
+                f"[[[ MANDATORY RESPONSE FORMAT ]]]\n"
+                f"You must generate the report by filling in the fields below:\n\n"
+                f"1. **FINDINGS SUMMARY**\n"
+                f"   - (Describe visual changes and cite AI probabilities)\n\n"
+                f"2. **RISK CLASSIFICATION**\n"
+                f"   - (List only levels with positive findings. Omit empty ones)\n"
+                f"   - [ ] CRITICAL (Immediate Risk)\n"
+                f"   - [ ] SEVERE\n"
+                f"   - [ ] REQUIRES INVESTIGATION\n"
+                f"   - [ ] MINOR FINDINGS\n\n"
+                f"3. **REASONING AND MANAGEMENT**\n"
+                f"   - (Differentials and suggested management)\n"
+                f"--------------------------------------------------\n"
+            )
+
+_xray_analyzer = None
+_xray_analyzer_error = None
+
+def get_xray_analyzer() -> XRayAnalyzer:
+    """Lazy factory — instantiates XRayAnalyzer on first call."""
+    global _xray_analyzer, _xray_analyzer_error
+    if _xray_analyzer is None and _xray_analyzer_error is None:
+        try:
+            _xray_analyzer = XRayAnalyzer()
+        except Exception as e:
+            _xray_analyzer_error = str(e)
+            logger.exception(f"Failed to initialize XRayAnalyzer: {e}")
+    if _xray_analyzer_error is not None and _xray_analyzer is None:
+        raise RuntimeError(f"XRayAnalyzer init failed: {_xray_analyzer_error}")
+    return _xray_analyzer
+
+def is_xray_analyzer_loaded() -> bool:
+    return _xray_analyzer is not None
+
+def xray_analyzer_error():
+    return _xray_analyzer_error

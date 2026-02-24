@@ -1,0 +1,126 @@
+Pipeline de Análise de ECG — Estado atual                                                                                                                                                                                                   
+                                                                                                                                                                                                                                              
+  Visão geral do fluxo                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                              
+  Imagem ECG (JPEG/PNG)
+          │
+          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │                   ETAPA 1 — DIGITALIZAÇÃO               │
+  │                                                         │
+  │  Nível 1 ─── SOTA (nnU-Net M3/fold_all + Hough)        │
+  │               ├─ Corrigir rotação via HoughLines        │
+  │               ├─ nnUNetv2_predict (subprocess, 1 worker)│
+  │               ├─ Máscara 12 classes → 12 máscaras bin.  │
+  │               ├─ Vectorização por centroide de coluna   │
+  │               └─ → np.ndarray (12, 5000) @ 500 Hz, mV  │
+  │                                                         │
+  │  Nível 2 ─── Ahus-AIM (U-Net dewarping + segmentação)  │
+  │               ├─ TPS dewarping (torch_tps)              │
+  │               ├─ U-Net segmentação (ecg_segmentation)   │
+  │               ├─ LeadIdentifier (layout_all.yml)        │
+  │               └─ → np.ndarray (12, N) @ ~500 Hz         │
+  │                                                         │
+  │  Nível 3 ─── OpenCV rhythm strip (fallback)            │
+  │               └─ → dict {signal: [N], sample_rate: int} │
+  └─────────────────────────────────────────────────────────┘
+          │
+          ▼ signal_np (12, 5000) ou rhythm_strip
+          │
+  ┌─────────────────────────────────────────────────────────┐
+  │           ETAPA 2 — ANÁLISE RULE-BASED (neurokit2)      │
+  │                                                         │
+  │  Entrada: Lead II extraída do signal_np (índice 1)      │
+  │           ou sinal 1D do rhythm_strip                   │
+  │  Saídas:  hr (BPM), rhythm (str), rr_cv, qrs_duration  │
+  │  Nota: rr_cv é o único dado confiável no fallback OpenCV│
+  └─────────────────────────────────────────────────────────┘
+          │
+          ▼ (somente se signal_np disponível)
+          │
+  ┌─────────────────────────────────────────────────────────┐
+  │         ETAPA 3 — INFERÊNCIA ML (3 modelos em série)    │
+  │                                                         │
+  │  A. CODE-15 ResNet (TensorFlow/Keras — CPU)             │
+  │     Input:  (12, 5000) → resample → (1, 4096, 12)       │
+  │     Output: 6 classes → NORM / AF / LBBB / RBBB /       │
+  │             1dAVb / ST                                   │
+  │     Fonte:  CODE study — 2M pacientes, USP/PhysioNet    │
+  │                                                         │
+  │  B. Queenbee ECG Transformer (PyTorch — GPU)            │
+  │     Input:  (1, 1, 12, 5000)                            │
+  │     Output: 5 superclasses → NORM / MI / STTC / CD / HYP│
+  │     Fonte:  PTB-XL; fine-tuning multi-label             │
+  │                                                         │
+  │  C. ECGFounder Net1D (PyTorch — GPU)                    │
+  │     Input:  (1, 12, 5000) z-score normalizado           │
+  │     Output: 150 diagnósticos via sigmoid multi-label    │
+  │             (top label + all_probs para top-5)          │
+  │     Fonte:  PKU — 10M+ ECGs                             │
+  │                                                         │
+  │  ⛔ BHF ConvNeXt — DESABILITADO                         │
+  │     Motivo: cabeça classificadora sem fine-tuning ECG   │
+  └─────────────────────────────────────────────────────────┘
+          │
+          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │              ETAPA 4 — CONSENSO                         │
+  │                                                         │
+  │  Votos elegíveis: CODE-15, Queenbee, ECGFounder         │
+  │  Filtro 1: prob < 0.40 → descartado                     │
+  │  Filtro 2: confidence="low" com prob < 0.75 → descart.  │
+  │  Decisão: maioria simples                               │
+  │  Desempate: CLINICAL_SEVERITY                           │
+  │    (AF=6 > LBBB=5 > RBBB=4 > 1dAVb=3 > ST=2 > SB=1)   │
+  └─────────────────────────────────────────────────────────┘
+          │
+          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │           ETAPA 5 — MONTAGEM DO RESULTADO               │
+  │                                                         │
+  │  status:   success / partial_cv / partial / error       │
+  │  rhythm:   diagnóstico do consenso                      │
+  │  hr:       neurokit2 (prioritário) ou heurística        │
+  │  findings: [CODE-15, Queenbee, ECGFounder top-1]        │
+  │            + [ECGFounder] top-5 se prob ≥ 0.15          │
+  │  method:   "Ensemble (CODE-15, Queenbee, ECGFounder,    │
+  │             neurokit2)"                                  │
+  │  nk_rhythm / nk_qrs_duration_ms / nk_rr_cv (se nk ok)  │
+  │  max_prob: maior confiança entre os votos               │
+  └─────────────────────────────────────────────────────────┘
+          │
+          ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │         ETAPA 6 — FORMATAÇÃO PARA O LLM                 │
+  │                                                         │
+  │  get_summary_for_prompt() gera string injetada          │
+  │  no contexto da sessão antes da resposta do modelo.     │
+  │                                                         │
+  │  Templates por status:                                  │
+  │  • success:    [DADOS ECG] HD / FC / Ritmo / Achados /  │
+  │                Correlação Clínica (LBBB→Sgarbossa,      │
+  │                AF→sem onda P, etc.)                     │
+  │  • partial_cv: [ECG — OpenCV] apenas rr_cv + BHF visual │
+  │  • partial:    aviso de digitalização parcial           │
+  │  • error:      instrução de análise visual pura         │
+  └─────────────────────────────────────────────────────────┘
+
+  ---
+  Tabela de modelos ativos
+
+  ┌──────────────────────┬────────────────────────────┬──────────┬────────────────────────────────┬─────────────────────────────────┐
+  │        Modelo        │            Tipo            │ Hardware │            Classes             │           Treinamento           │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ CODE-15 ResNet       │ CNN temporal (Keras)       │ CPU      │ 6 (NORM/AF/LBBB/RBBB/1dAVb/ST) │ 2M pacientes, CODE study Brasil │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ Queenbee Transformer │ ECG Transformer (PyTorch)  │ GPU      │ 5 superclasses PTB-XL          │ PTB-XL multi-label              │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ ECGFounder Net1D     │ 1D-ResNet (PyTorch)        │ GPU      │ 150 diagnósticos               │ 10M+ ECGs (PKU)                 │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ neurokit2            │ Rule-based (algoritmo)     │ CPU      │ HR, QRS, rr_cv, ritmo          │ —                               │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ Ahus-AIM             │ U-Net (digitalizador)      │ GPU      │ —                              │ Open-ECG-Digitizer              │
+  ├──────────────────────┼────────────────────────────┼──────────┼────────────────────────────────┼─────────────────────────────────┤
+  │ SOTA nnU-Net         │ nnU-Net 2D (digitalizador) │ GPU      │ —                              │ PhysioNet 2024, 500 sinais      │
+  └──────────────────────┴────────────────────────────┴──────────┴────────────────────────────────┴─────────────────────────────────┘
+
