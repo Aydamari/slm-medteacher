@@ -100,6 +100,12 @@ body {
     margin: 0;
 }
 
+.logo-img {
+    height: 40px;
+    width: auto;
+    display: block;
+}
+
 .version {
     font-size: var(--font-size-sm);
     color: var(--text-muted);
