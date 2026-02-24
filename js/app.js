@@ -7,7 +7,7 @@ class AppManager {
     constructor() {
         this.apiBaseUrl = 'http://localhost:8000';
         this.currentSessionId = null;
-        this.currentLanguage = 'pt';
+        this.currentLanguage = 'en';
         this.currentMode = 'clinical-reasoning';
         this.currentTier = 'local_4b';
         this.currentLlmModel = 'gemini_2.5_flash';
